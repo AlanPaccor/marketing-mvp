@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { app } from '@/app/firebase/config';
 import { supabase } from '@/app/supabase/client';
+import { createUserProfile } from '@/app/services/profileService';
 
 export default function SignUp() {
   const [email, setEmail] = useState('');
@@ -69,6 +70,58 @@ export default function SignUp() {
 
       // Send email verification
       await sendEmailVerification(user);
+
+      // Create initial profile based on user type
+      try {
+        if (userType === 'business') {
+          const { error } = await supabase
+            .from('business_profiles')
+            .insert([{ 
+              user_id: user.uid,
+              business_name: '', 
+              industry: '',
+              website: '',
+              location: '',
+              description: ''
+            }])
+            .select();
+          
+          if (error) {
+            if (error.code === '23505') {
+              console.log('Business profile already exists');
+            } else if (error.code === '42501') {
+              console.error('RLS policy error when creating business profile. Check your Supabase policies.');
+            } else {
+              console.error('Error creating business profile:', error);
+            }
+          }
+        } else if (userType === 'influencer') {
+          const { error } = await supabase
+            .from('influencer_profiles')
+            .insert([{ 
+              user_id: user.uid,
+              full_name: '', 
+              platform: '',
+              followers: null,
+              niche: '',
+              bio: ''
+            }])
+            .select();
+          
+          if (error) {
+            if (error.code === '23505') {
+              console.log('Influencer profile already exists');
+            } else if (error.code === '42501') {
+              console.error('RLS policy error when creating influencer profile. Check your Supabase policies.');
+            } else {
+              console.error('Error creating influencer profile:', error);
+            }
+          }
+        }
+      } catch (profileError) {
+        console.error('Error creating profile:', profileError);
+        // Continue with the signup process even if profile creation fails
+      }
 
       // Redirect to email verification page
       router.push('/auth/verify-email');
