@@ -71,15 +71,19 @@ export default function BusinessProfile() {
           // Set the profile image if it exists
           if (data.profile_image_url) {
             setProfileImage(data.profile_image_url);
-          } else {
+          } else if (user.uid) {
             // Try to get the image from Firebase Storage
-            const imageUrl = await getProfileImageURL(data.user_id);
-            if (imageUrl) {
-              setProfileImage(imageUrl);
-              // Update the profile with the image URL
-              await updateUserProfile('business_profiles', {
-                profile_image_url: imageUrl
-              });
+            try {
+              const imageUrl = await getProfileImageURL(user.uid);
+              if (imageUrl) {
+                setProfileImage(imageUrl);
+                // Update the profile with the image URL
+                await updateUserProfile('business_profiles', {
+                  profile_image_url: imageUrl
+                });
+              }
+            } catch (err) {
+              console.error('Error loading profile image from storage:', err);
             }
           }
         }
@@ -107,6 +111,7 @@ export default function BusinessProfile() {
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
+          // This is just a preview, not the actual uploaded image URL
           setProfileImage(event.target.result as string);
         }
       };
@@ -115,26 +120,48 @@ export default function BusinessProfile() {
   };
   
   const handleImageUpload = async () => {
-    if (!imageFile || !user) return;
+    // Clear any previous errors
+    setError('');
+    
+    if (!imageFile) {
+      setError('Please select an image to upload');
+      return;
+    }
+    
+    if (!user || !user.id) {
+      setError('You must be logged in to upload an image');
+      console.error('User not authenticated or missing ID:', user);
+      return;
+    }
     
     try {
       setImageLoading(true);
-      const downloadURL = await uploadProfileImage(user.uid, imageFile);
+      console.log('Uploading image for user:', user.id);
+      const downloadURL = await uploadProfileImage(user.id, imageFile);
       
       // Update the profile with the image URL
       await updateUserProfile('business_profiles', {
         profile_image_url: downloadURL
       });
       
+      // Update the local state
       setProfileImage(downloadURL);
-      setFormData({
-        ...formData,
+      setFormData(prev => ({
+        ...prev,
         profile_image_url: downloadURL
-      });
+      }));
       
+      // Clear the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       setImageFile(null);
-    } catch (err: any) {
-      setError(err.message);
+      
+      // Show success message
+      alert('Profile image uploaded successfully!');
+    } catch (error: any) {
+      console.error('Error uploading image:', error);
+      setError(error.message || 'Failed to upload image');
     } finally {
       setImageLoading(false);
     }
