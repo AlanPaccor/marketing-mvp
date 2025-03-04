@@ -6,21 +6,32 @@ import { useAuth } from '@/app/context/AuthContext';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/app/supabase/client';
+import { fetchUserProfile } from '@/app/services/profileService';
+import { getProfileImageURL } from '@/app/firebase/storage';
+
+// Define the Campaign type
+interface Campaign {
+  id: number;
+  title: string;
+  status: string;
+  budget: string;
+  influencers: number;
+  reach: string;
+  endDate: string;
+}
 
 export default function BusinessDashboard() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [campaigns, setCampaigns] = useState([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stats, setStats] = useState({
     activeCampaigns: 0,
     totalInfluencers: 0,
     totalReach: 0,
     pendingRequests: 0
   });
-  const [profileData, setProfileData] = useState({
-    companyName: '',
-    logo: ''
-  });
+  const [profile, setProfile] = useState<any>(null);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading) {
@@ -39,7 +50,7 @@ export default function BusinessDashboard() {
       // Fetch business data
       fetchBusinessData();
       // Fetch profile data
-      fetchProfileData();
+      loadProfileData();
     }
   }, [user, loading, router]);
 
@@ -95,30 +106,23 @@ export default function BusinessDashboard() {
     }
   };
 
-  const fetchProfileData = async () => {
+  const loadProfileData = async () => {
     try {
-      // Fetch profile data from Supabase
-      const { data, error } = await supabase
-        .from('BusinessProfiles')
-        .select('company_name, logo')
-        .eq('firebase_uid', user?.id)
-        .single();
+      const { data } = await fetchUserProfile('business_profiles');
+      setProfile(data);
       
-      if (error) {
-        console.error('Error fetching business profile:', error);
-        // Use email as fallback
-        setProfileData({
-          companyName: user?.email?.split('@')[0] || 'Business',
-          logo: ''
-        });
-      } else if (data) {
-        setProfileData({
-          companyName: data.company_name || user?.email?.split('@')[0] || 'Business',
-          logo: data.logo || ''
-        });
+      // Set profile image
+      if (data?.profile_image_url) {
+        setProfileImage(data.profile_image_url);
+      } else if (data?.user_id) {
+        // Try to get image from Firebase Storage
+        const imageUrl = await getProfileImageURL(data.user_id);
+        if (imageUrl) {
+          setProfileImage(imageUrl);
+        }
       }
-    } catch (err) {
-      console.error('Error in fetchProfileData:', err);
+    } catch (error) {
+      console.error('Error loading profile data:', error);
     }
   };
 
@@ -147,40 +151,129 @@ export default function BusinessDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">Business Dashboard</h1>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex">
+              <div className="flex-shrink-0 flex items-center">
+                <Link href="/business/dashboard">
+                  <span className="text-xl font-bold text-indigo-600">InfluencerHub</span>
+                </Link>
+              </div>
+              <nav className="ml-6 flex space-x-8">
+                <Link 
+                  href="/business/dashboard" 
+                  className="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                >
+                  Dashboard
+                </Link>
+                <Link 
+                  href="/business/campaigns" 
+                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                >
+                  Campaigns
+                </Link>
+                <Link 
+                  href="/business/influencers/discover" 
+                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                >
+                  Discover
+                </Link>
+                <Link 
+                  href="/business/messages" 
+                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                >
+                  Messages
+                </Link>
+              </nav>
+            </div>
             <div className="flex items-center space-x-4">
-              <Link href="/business/notifications" className="text-gray-500 hover:text-gray-700">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <Link 
+                href="/business/notifications" 
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg className="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                 </svg>
               </Link>
-              <Link href="/business/profile" className="flex items-center space-x-2 group">
-                <div className="relative w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center overflow-hidden border-2 border-white group-hover:border-indigo-200 transition-all">
-                  {profileData.logo ? (
-                    <Image 
-                      src={profileData.logo} 
-                      alt={profileData.companyName} 
-                      fill 
-                      className="object-cover"
-                    />
-                  ) : (
-                    <span className="text-lg font-semibold text-indigo-700">
-                      {profileData.companyName.charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </div>
-                <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-600">
-                  {profileData.companyName}
-                </span>
-              </Link>
+              <div className="relative">
+                <button 
+                  type="button"
+                  className="flex items-center focus:outline-none"
+                >
+                  <div className="h-8 w-8 rounded-full overflow-hidden bg-gray-200">
+                    {profileImage ? (
+                      <Image 
+                        src={profileImage} 
+                        alt={profile?.business_name || 'Business Profile'} 
+                        width={32} 
+                        height={32} 
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center">
+                        <span className="text-sm font-medium text-gray-500">
+                          {profile?.business_name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'B'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Business Profile Card */}
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-8">
+          <div className="px-4 py-5 sm:px-6 flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="relative w-16 h-16 rounded-full overflow-hidden bg-indigo-100 flex items-center justify-center">
+                {profileImage ? (
+                  <Image 
+                    src={profileImage} 
+                    alt={profile?.business_name || 'Business Profile'} 
+                    width={64}
+                    height={64}
+                    className="object-cover w-full h-full"
+                  />
+                ) : (
+                  <span className="text-2xl font-semibold text-indigo-700">
+                    {profile?.business_name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'B'}
+                  </span>
+                )}
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">{profile?.business_name || 'Your Business'}</h2>
+                <p className="text-sm text-gray-500">{profile?.industry || 'Complete your profile'}</p>
+              </div>
+            </div>
+            <Link 
+              href="/business/profile" 
+              className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
+            >
+              Edit Profile
+            </Link>
+          </div>
+          {!profile?.business_name && (
+            <div className="px-4 py-3 bg-yellow-50 border-t border-yellow-200">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">
+                    Your profile is incomplete. <Link href="/business/profile" className="font-medium underline text-yellow-700 hover:text-yellow-600">Complete your profile</Link> to get the most out of our platform.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Stats */}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <div className="bg-white overflow-hidden shadow rounded-lg">

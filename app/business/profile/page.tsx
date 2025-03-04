@@ -1,26 +1,25 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { fetchUserProfile, updateUserProfile, createUserProfile } from '@/app/services/profileService';
+import { uploadProfileImage, getProfileImageURL } from '@/app/firebase/storage';
+import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/app/context/AuthContext';
-import Link from 'next/link';
-import { supabase } from '@/app/supabase/client';
 
+// Update the interface to include profile_image_url
 interface BusinessProfile {
-  companyName: string;
+  id: string;
+  user_id: string;
+  business_name: string;
   industry: string;
   website: string;
   location: string;
   description: string;
-  logo: string;
-  contactEmail: string;
-  contactPhone: string;
-  socialLinks: {
-    instagram: string;
-    twitter: string;
-    facebook: string;
-    linkedin: string;
-  };
+  profile_image_url?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export default function BusinessProfile() {
@@ -29,81 +28,147 @@ export default function BusinessProfile() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [formData, setFormData] = useState({
+    business_name: '',
+    industry: '',
+    website: '',
+    location: '',
+    description: '',
+    profile_image_url: '',
+  });
 
   useEffect(() => {
-    if (!loading) {
-      // If not logged in, redirect to login
+    async function loadProfile() {
       if (!user) {
-        router.push('/auth/login');
+        // If no user is authenticated, don't try to fetch the profile
+        setIsLoading(false);
         return;
       }
       
-      // If not a business account, redirect to appropriate dashboard
-      if (user.userType !== 'business') {
-        router.push('/influencer/dashboard');
-        return;
-      }
-      
-      // Fetch business profile data
-      fetchBusinessProfile();
-    }
-  }, [user, loading, router]);
-
-  const fetchBusinessProfile = async () => {
-    try {
       setIsLoading(true);
-      
-      // Fetch profile data from Supabase
-      const { data, error } = await supabase
-        .from('BusinessProfiles')
-        .select('*')
-        .eq('firebase_uid', user?.id)
-        .single();
+      const { data, error } = await fetchUserProfile('business_profiles');
       
       if (error) {
-        console.error('Error fetching business profile:', error);
-        // If no profile exists yet, create a default one
-        if (error.code === 'PGRST116') {
-          setProfile({
-            companyName: '',
-            industry: '',
-            website: '',
-            location: '',
-            description: '',
-            logo: '',
-            contactEmail: user?.email || '',
-            contactPhone: '',
-            socialLinks: {
-              instagram: '',
-              twitter: '',
-              facebook: '',
-              linkedin: ''
-            }
+        setError(error.message);
+      } else {
+        setProfile(data);
+        if (data) {
+          setFormData({
+            business_name: data.business_name || '',
+            industry: data.industry || '',
+            website: data.website || '',
+            location: data.location || '',
+            description: data.description || '',
+            profile_image_url: data.profile_image_url || '',
           });
-        } else {
-          setError('Failed to load profile data');
-        }
-      } else if (data) {
-        setProfile({
-          companyName: data.company_name || '',
-          industry: data.industry || '',
-          website: data.website || '',
-          location: data.location || '',
-          description: data.description || '',
-          logo: data.logo || '',
-          contactEmail: data.contact_email || user?.email || '',
-          contactPhone: data.contact_phone || '',
-          socialLinks: {
-            instagram: data.instagram_url || '',
-            twitter: data.twitter_url || '',
-            facebook: data.facebook_url || '',
-            linkedin: data.linkedin_url || ''
+          
+          // Set the profile image if it exists
+          if (data.profile_image_url) {
+            setProfileImage(data.profile_image_url);
+          } else {
+            // Try to get the image from Firebase Storage
+            const imageUrl = await getProfileImageURL(data.user_id);
+            if (imageUrl) {
+              setProfileImage(imageUrl);
+              // Update the profile with the image URL
+              await updateUserProfile('business_profiles', {
+                profile_image_url: imageUrl
+              });
+            }
           }
-        });
+        }
       }
-    } catch (err) {
-      console.error('Error in fetchBusinessProfile:', err);
-      setError('An unexpected error occurred');
+      setIsLoading(false);
+    }
+    
+    loadProfile();
+  }, [user]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData({
+      ...formData,
+      [name]: value
+    });
+  };
+  
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setImageFile(file);
+      
+      // Create a preview
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setProfileImage(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  
+  const handleImageUpload = async () => {
+    if (!imageFile || !user) return;
+    
+    try {
+      setImageLoading(true);
+      const downloadURL = await uploadProfileImage(user.uid, imageFile);
+      
+      // Update the profile with the image URL
+      await updateUserProfile('business_profiles', {
+        profile_image_url: downloadURL
+      });
+      
+      setProfileImage(downloadURL);
+      setFormData({
+        ...formData,
+        profile_image_url: downloadURL
+      });
+      
+      setImageFile(null);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setImageLoading(false);
+    }
+  };
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    
+    try {
+      // If there's a new image, upload it first
+      if (imageFile) {
+        await handleImageUpload();
+      }
+      
+      let result;
+      
+      if (profile) {
+        // Update existing profile
+        result = await updateUserProfile('business_profiles', formData);
+      } else {
+        // Create new profile
+        result = await createUserProfile('business_profiles', formData);
+      }
+      
+      if (result.error) {
+        throw result.error;
+      }
+      
+      setProfile(result.data);
+      setIsEditing(false);
+      // Show success message
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setIsLoading(false);
     }
@@ -117,160 +182,235 @@ export default function BusinessProfile() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Business Profile</h1>
-          <div className="flex items-center space-x-4">
-            <Link 
-              href="/business/dashboard"
-              className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
-            >
-              Dashboard
-            </Link>
-            <button 
-              onClick={() => router.push('/auth/logout')}
-              className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
-            >
-              Logout
-            </button>
-          </div>
+        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-gray-900">Business Profile</h1>
+          <Link href="/business/dashboard" className="text-indigo-600 hover:text-indigo-900">
+            Back to Dashboard
+          </Link>
         </div>
       </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {error && (
-          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-            {error}
-          </div>
-        )}
-
-        <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
+      
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
           <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
             <div>
               <h3 className="text-lg leading-6 font-medium text-gray-900">Business Information</h3>
-              <p className="mt-1 max-w-2xl text-sm text-gray-500">Details about your business that will be shown to influencers</p>
+              <p className="mt-1 max-w-2xl text-sm text-gray-500">Personal details and business information.</p>
             </div>
-            <Link
-              href="/business/profile/edit"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-            >
-              Edit Profile
-            </Link>
+            {!isEditing && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Edit Profile
+              </button>
+            )}
           </div>
-          <div className="border-t border-gray-200">
-            <dl>
-              <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Company name</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.companyName || 'Not provided'}
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Industry</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.industry || 'Not provided'}
-                </dd>
-              </div>
-              <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Website</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.website ? (
-                    <a href={profile.website} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-500">
-                      {profile.website}
-                    </a>
-                  ) : (
-                    'Not provided'
-                  )}
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Location</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.location || 'Not provided'}
-                </dd>
-              </div>
-              <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Contact email</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.contactEmail || 'Not provided'}
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Contact phone</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.contactPhone || 'Not provided'}
-                </dd>
-              </div>
-              <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Description</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.description || 'No description provided'}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-
-        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-          <div className="px-4 py-5 sm:px-6">
-            <h3 className="text-lg leading-6 font-medium text-gray-900">Social Media</h3>
-            <p className="mt-1 max-w-2xl text-sm text-gray-500">Your business's social media presence</p>
-          </div>
-          <div className="border-t border-gray-200">
-            <dl>
-              <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Instagram</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.socialLinks.instagram ? (
-                    <a href={profile.socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-500">
-                      {profile.socialLinks.instagram}
-                    </a>
-                  ) : (
-                    'Not provided'
-                  )}
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Twitter</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.socialLinks.twitter ? (
-                    <a href={profile.socialLinks.twitter} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-500">
-                      {profile.socialLinks.twitter}
-                    </a>
-                  ) : (
-                    'Not provided'
-                  )}
-                </dd>
-              </div>
-              <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">Facebook</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.socialLinks.facebook ? (
-                    <a href={profile.socialLinks.facebook} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-500">
-                      {profile.socialLinks.facebook}
-                    </a>
-                  ) : (
-                    'Not provided'
-                  )}
-                </dd>
-              </div>
-              <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500">LinkedIn</dt>
-                <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
-                  {profile?.socialLinks.linkedin ? (
-                    <a href={profile.socialLinks.linkedin} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-500">
-                      {profile.socialLinks.linkedin}
-                    </a>
-                  ) : (
-                    'Not provided'
-                  )}
-                </dd>
-              </div>
-            </dl>
-          </div>
+          
+          {!isEditing ? (
+            <div className="border-t border-gray-200">
+              <dl>
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Profile Image</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profileImage ? (
+                      <div className="h-24 w-24 rounded-full overflow-hidden">
+                        <Image 
+                          src={profileImage} 
+                          alt="Business profile" 
+                          width={96} 
+                          height={96} 
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center">
+                        <span className="text-gray-500">No image</span>
+                      </div>
+                    )}
+                  </dd>
+                </div>
+                
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Company name</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.business_name || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Industry</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.industry || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Website</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.website ? (
+                      <a href={profile.website} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-500">
+                        {profile.website}
+                      </a>
+                    ) : (
+                      'Not provided'
+                    )}
+                  </dd>
+                </div>
+                
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Location</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.location || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Description</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.description || 'No description provided'}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <div className="border-t border-gray-200 p-4">
+              <form onSubmit={handleSubmit}>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Profile Image</label>
+                  <div className="mt-1 flex items-center space-x-5">
+                    {profileImage ? (
+                      <div className="h-24 w-24 rounded-full overflow-hidden">
+                        <Image 
+                          src={profileImage} 
+                          alt="Business profile" 
+                          width={96} 
+                          height={96} 
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center">
+                        <span className="text-gray-500">No image</span>
+                      </div>
+                    )}
+                    
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleImageChange}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="bg-white py-2 px-3 border border-gray-300 rounded-md shadow-sm text-sm leading-4 font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
+                      Change
+                    </button>
+                    
+                    {imageFile && (
+                      <button
+                        type="button"
+                        onClick={handleImageUpload}
+                        disabled={imageLoading}
+                        className="ml-3 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      >
+                        {imageLoading ? 'Uploading...' : 'Upload'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Business Name</label>
+                  <input
+                    type="text"
+                    name="business_name"
+                    value={formData.business_name}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Industry</label>
+                  <input
+                    type="text"
+                    name="industry"
+                    value={formData.industry}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Website</label>
+                  <input
+                    type="url"
+                    name="website"
+                    value={formData.website}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Location</label>
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Description</label>
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    rows={4}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  ></textarea>
+                </div>
+                
+                <div className="flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(false)}
+                    className="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </div>
       </main>
     </div>
