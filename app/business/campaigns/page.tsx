@@ -171,31 +171,37 @@ export default function AllCampaigns() {
                   <span className="text-xl font-bold text-indigo-600">InfluencerHub</span>
                 </Link>
               </div>
-              <nav className="ml-6 flex space-x-8">
+              <div className="ml-6 flex space-x-4">
                 <Link 
                   href="/business/dashboard" 
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700"
+                  className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
                 >
                   Dashboard
                 </Link>
                 <Link 
                   href="/business/campaigns" 
-                  className="inline-flex items-center px-1 pt-1 border-b-2 border-indigo-500 text-sm font-medium text-gray-900"
+                  className="px-3 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
                 >
                   Campaigns
                 </Link>
                 <Link 
-                  href="/business/influencers" 
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700"
+                  href="/business/influencers/discover" 
+                  className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
                 >
                   Influencers
                 </Link>
-              </nav>
+                <Link 
+                  href="/business/analytics" 
+                  className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
+                >
+                  Analytics
+                </Link>
+              </div>
             </div>
             <div className="flex items-center">
               <Link
-                href="/business/settings"
-                className="ml-3 inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700"
+                href="/business/campaigns/settings"
+                className="ml-3 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
               >
                 Settings
               </Link>

@@ -352,14 +352,26 @@ export default function CreateCampaign() {
                   <span className="text-xl font-bold text-indigo-600">InfluencerHub</span>
                 </Link>
               </div>
-              <nav className="ml-6 flex space-x-8">
+              <div className="ml-6 flex space-x-4">
+                <Link 
+                  href="/business/dashboard" 
+                  className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
+                >
+                  Dashboard
+                </Link>
                 <Link 
                   href="/business/campaigns" 
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700"
+                  className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
                 >
                   All Campaigns
                 </Link>
-              </nav>
+                <Link 
+                  href="/business/campaigns/create" 
+                  className="px-3 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+                >
+                  Create Campaign
+                </Link>
+              </div>
             </div>
           </div>
         </div>
