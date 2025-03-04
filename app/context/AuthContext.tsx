@@ -152,4 +152,75 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       {children}
     </AuthContext.Provider>
   );
+};
+
+// Add proper error handling for Supabase queries
+const fetchUserType = async (firebaseUid: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('Users')
+      .select('userType')
+      .eq('firebase_uid', firebaseUid)
+      .single();
+    
+    if (error) {
+      console.error('Error fetching user type:', error);
+      return null;
+    }
+    
+    return data?.userType;
+  } catch (err) {
+    console.error('Exception fetching user type:', err);
+    return null;
+  }
+};
+
+// Update the createUser function to handle conflicts
+const createUser = async (firebaseUid: string, email: string, userType: string) => {
+  try {
+    // First check if the user already exists
+    const { data: existingUser } = await supabase
+      .from('Users')
+      .select('*')
+      .eq('firebase_uid', firebaseUid)
+      .single();
+    
+    if (existingUser) {
+      console.log('User already exists in Supabase');
+      return existingUser;
+    }
+    
+    // If not, create the user
+    const { data, error } = await supabase
+      .from('Users')
+      .insert([
+        { 
+          firebase_uid: firebaseUid,
+          email: email,
+          userType: userType
+        }
+      ])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating user in Supabase:', error);
+      // If it's a conflict error, try to fetch the user again
+      if (error.code === '23505') { // Unique violation
+        const { data: existingUser } = await supabase
+          .from('Users')
+          .select('*')
+          .eq('firebase_uid', firebaseUid)
+          .single();
+        
+        return existingUser;
+      }
+      throw error;
+    }
+    
+    return data;
+  } catch (err) {
+    console.error('Exception creating user:', err);
+    throw err;
+  }
 }; 

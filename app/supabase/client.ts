@@ -1,23 +1,24 @@
 import { createClient as supabaseCreateClient } from '@supabase/supabase-js';
 
 // Create a single supabase client for interacting with your database
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-// Create the client with additional headers for authentication
-export const supabase = supabaseCreateClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-  global: {
-    headers: {
-      'apikey': supabaseAnonKey,
+export const supabase = supabaseCreateClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+  {
+    auth: {
+      persistSession: true,
     },
-  },
-});
+    // Add proper headers for API requests
+    global: {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    },
+  }
+);
 
 // Export a function to create a client (for consistency with your imports)
-export function createClient() {
+export function getClient() {
   return supabase;
 } 
