@@ -6,7 +6,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/app/supabase/client';
-import { fetchUserProfile } from '@/app/services/profileService';
+import { fetchUserProfile, updateUserProfile } from '@/app/services/profileService';
 import { getProfileImageURL } from '@/app/firebase/storage';
 
 // Define the Campaign type
@@ -147,7 +147,7 @@ export default function BusinessDashboard() {
     }
   };
 
-  const getStatusColor = (status) => {
+  const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case 'active':
         return 'bg-green-100 text-green-800';
@@ -174,38 +174,12 @@ export default function BusinessDashboard() {
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
                 <Link href="/business/dashboard">
                   <span className="text-xl font-bold text-indigo-600">InfluencerHub</span>
                 </Link>
               </div>
-              <nav className="ml-6 flex space-x-8">
-                <Link 
-                  href="/business/dashboard" 
-                  className="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Dashboard
-                </Link>
-                <Link 
-                  href="/business/campaigns" 
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Campaigns
-                </Link>
-                <Link 
-                  href="/business/influencers/discover" 
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Discover
-                </Link>
-                <Link 
-                  href="/business/messages" 
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Messages
-                </Link>
-              </nav>
             </div>
             <div className="flex items-center space-x-4">
               <Link 

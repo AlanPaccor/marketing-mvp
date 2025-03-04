@@ -161,9 +161,15 @@ export default function InfluencerDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">Influencer Dashboard</h1>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <Link href="/influencer/dashboard">
+                  <span className="text-xl font-bold text-indigo-600">InfluencerHub</span>
+                </Link>
+              </div>
+            </div>
             <div className="flex items-center space-x-4">
               <Link 
                 href="/influencer/notifications" 
@@ -239,27 +245,7 @@ export default function InfluencerDashboard() {
               <div className="flex items-center">
                 <div className="flex-shrink-0 bg-indigo-100 rounded-md p-3">
                   <svg className="h-6 w-6 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <div className="ml-5 w-0 flex-1">
-                  <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">Total Campaigns</dt>
-                    <dd>
-                      <div className="text-lg font-semibold text-gray-900">{stats.totalCampaigns}</div>
-                    </dd>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-green-100 rounded-md p-3">
-                  <svg className="h-6 w-6 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
                 </div>
                 <div className="ml-5 w-0 flex-1">
@@ -270,6 +256,13 @@ export default function InfluencerDashboard() {
                     </dd>
                   </dl>
                 </div>
+              </div>
+            </div>
+            <div className="bg-gray-50 px-4 py-4 sm:px-6">
+              <div className="text-sm">
+                <Link href="/influencer/campaigns" className="font-medium text-indigo-600 hover:text-indigo-500">
+                  View all campaigns
+                </Link>
               </div>
             </div>
           </div>
@@ -323,11 +316,11 @@ export default function InfluencerDashboard() {
         </div>
 
         {/* Campaigns */}
-        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-          <div className="px-4 py-5 border-b border-gray-200 sm:px-6 flex justify-between items-center">
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg mt-8">
+          <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
             <h3 className="text-lg leading-6 font-medium text-gray-900">Your Campaigns</h3>
-            <Link
-              href="/influencer/campaigns"
+            <Link 
+              href="/influencer/campaigns" 
               className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
             >
               View All
