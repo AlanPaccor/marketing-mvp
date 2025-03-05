@@ -1,127 +1,215 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { fetchUserProfile, updateUserProfile, createUserProfile } from '@/app/services/profileService';
-import { uploadProfileImage, getProfileImageURL } from '@/app/firebase/storage';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/app/context/AuthContext';
+import { supabase } from '@/app/supabase/client';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useAuth } from '@/app/context/AuthContext';
-import SocialMediaConnect from '@/app/components/SocialMediaConnect';
 
-// Update the interface to include profile_image_url
-interface InfluencerProfile {
-  id: string;
-  user_id: string;
+interface ProfileData {
+  id?: string;
+  user_id?: string;
   full_name: string;
   platform: string;
   followers: number;
   niche: string;
   bio: string;
-  profile_image_url?: string;
-  created_at?: string;
-  updated_at?: string;
-  verified_platforms?: string[];
-  youtube_connected?: boolean;
-  instagram_connected?: boolean;
-  tiktok_connected?: boolean;
-  twitter_connected?: boolean;
-  twitch_connected?: boolean;
+  profile_image_url: string;
+  location: string;
+  engagement_rate: number;
+  avg_likes: number;
+  audience_demographics: string;
+  verified_platforms: string[];
+  youtube_connected: boolean;
+  youtube_data?: any;
+  instagram_connected: boolean;
+  instagram_data?: any;
+  tiktok_connected: boolean;
+  tiktok_data?: any;
+  twitter_connected: boolean;
+  twitter_data?: any;
+  twitch_connected: boolean;
+  twitch_data?: any;
 }
 
-export default function InfluencerProfile() {
-  const { user, loading: authLoading } = useAuth();
-  const [profile, setProfile] = useState<InfluencerProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function ProfilePage() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageLoading, setImageLoading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const [formData, setFormData] = useState({
-    full_name: '',
-    platform: '',
-    followers: '',
-    niche: '',
-    bio: '',
-    profile_image_url: '',
-  });
-  
+
+  // Platform options
+  const platformOptions = [
+    'Instagram', 'TikTok', 'YouTube', 'Twitter', 'Facebook', 'LinkedIn', 'Pinterest', 'Twitch'
+  ];
+
+  // Niche options
+  const nicheOptions = [
+    'Technology', 'Fashion', 'Beauty', 'Fitness', 'Food', 'Travel', 
+    'Gaming', 'Music', 'Art', 'Sports', 'Lifestyle', 'Business',
+    'Education', 'Entertainment', 'Health', 'Parenting', 'Pets', 'Photography'
+  ];
+
   useEffect(() => {
-    async function loadProfile() {
-      if (!user) {
-        // If no user is authenticated, don't try to fetch the profile
-        setLoading(false);
-        return;
-      }
-      
-      setLoading(true);
-      const { data, error } = await fetchUserProfile('influencer_profiles');
-      
-      if (error) {
-        setError(error.message);
-      } else {
-        setProfile(data);
-        if (data) {
-          setFormData({
-            full_name: data.full_name || '',
-            platform: data.platform || '',
-            followers: data.followers?.toString() || '',
-            niche: data.niche || '',
-            bio: data.bio || '',
-            profile_image_url: data.profile_image_url || '',
-          });
-          
-          // Set profile image
-          if (data.profile_image_url) {
-            setProfileImage(data.profile_image_url);
-          } else if (data.user_id) {
-            try {
-              const imageUrl = await getProfileImageURL(data.user_id);
-              if (imageUrl) {
-                setProfileImage(imageUrl);
-              }
-            } catch (err) {
-              console.error('Error loading profile image:', err);
-            }
+    const fetchProfile = async () => {
+      if (!user) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('influencer_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (error) {
+          setError(error.message);
+        } else {
+          if (data) {
+            setProfile(data);
+          } else {
+            // Initialize with empty profile
+            setProfile({
+              full_name: '',
+              platform: '',
+              followers: 0,
+              niche: '',
+              bio: '',
+              profile_image_url: '',
+              location: '',
+              engagement_rate: 0,
+              avg_likes: 0,
+              audience_demographics: '',
+              verified_platforms: [],
+              youtube_connected: false,
+              instagram_connected: false,
+              tiktok_connected: false,
+              twitter_connected: false,
+              twitch_connected: false
+            });
+            // Start in editing mode for new profiles
+            setIsEditing(true);
           }
         }
+      } catch (err) {
+        console.error('Error fetching profile:', err);
+        setError('Failed to load profile');
+      } finally {
+        setIsLoading(false);
       }
-      setLoading(false);
+    };
+
+    if (!loading) {
+      fetchProfile();
     }
-    
-    loadProfile();
-  }, [user]);
-  
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  }, [user, loading]);
+
+  // Redirect if not logged in
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push('/auth/login');
+    }
+  }, [user, loading, router]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setProfile(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [name]: value
+      };
+    });
   };
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+
+  const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    const numValue = value === '' ? 0 : parseFloat(value);
+    setProfile(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [name]: numValue
+      };
+    });
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setImageFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!user || !profile) return;
+    
+    setIsSaving(true);
     setError(null);
     
     try {
-      // Convert followers to number
+      // Upload image if changed
+      let imageUrl = profile.profile_image_url;
+      
+      if (imageFile) {
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${user.id}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+        const filePath = `profile-images/${fileName}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('influencer-assets')
+          .upload(filePath, imageFile);
+          
+        if (uploadError) {
+          throw new Error(`Error uploading image: ${uploadError.message}`);
+        }
+        
+        const { data: urlData } = supabase.storage
+          .from('influencer-assets')
+          .getPublicUrl(filePath);
+          
+        imageUrl = urlData.publicUrl;
+      }
+      
+      // Save profile data
       const profileData = {
-        ...formData,
-        followers: parseInt(formData.followers) || 0
+        ...profile,
+        user_id: user.id,
+        profile_image_url: imageUrl,
+        updated_at: new Date().toISOString()
       };
       
       let result;
       
-      if (profile) {
+      if (profile.id) {
         // Update existing profile
-        result = await updateUserProfile('influencer_profiles', profileData);
+        result = await supabase
+          .from('influencer_profiles')
+          .update(profileData)
+          .eq('id', profile.id)
+          .select();
       } else {
-        // Create new profile
-        result = await createUserProfile('influencer_profiles', profileData);
+        // Insert new profile
+        result = await supabase
+          .from('influencer_profiles')
+          .insert({
+            ...profileData,
+            created_at: new Date().toISOString()
+          })
+          .select();
       }
       
       if (result.error) {
@@ -129,488 +217,400 @@ export default function InfluencerProfile() {
       }
       
       // Update the profile state with the new data
-      setProfile(result.data);
+      setProfile(result.data[0]);
       setIsEditing(false);
+      setImageFile(null);
+      setImagePreview(null);
+      
     } catch (err: any) {
       console.error('Error saving profile:', err);
-      setError(err.message || 'An error occurred while saving your profile');
+      setError(err.message || 'Failed to save profile');
     } finally {
-      setLoading(false);
+      setIsSaving(false);
     }
   };
-  
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setImageFile(file);
-      
-      // Create a preview
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          // This is just a preview, not the actual uploaded image URL
-          setProfileImage(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+
+  const triggerFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
     }
   };
-  
-  const handleImageUpload = async () => {
-    // Clear any previous errors
-    setError(null);
-    
-    if (!imageFile) {
-      setError('Please select an image to upload');
-      return;
-    }
-    
-    if (!user || !user.id) {
-      setError('You must be logged in to upload an image');
-      console.error('User not authenticated or missing ID:', user);
-      return;
-    }
-    
-    try {
-      setImageLoading(true);
-      console.log('Uploading image for user:', user.id);
-      const downloadURL = await uploadProfileImage(user.id, imageFile);
-      
-      // Update the profile with the image URL
-      await updateUserProfile('influencer_profiles', {
-        profile_image_url: downloadURL
-      });
-      
-      // Update the local state
-      setProfileImage(downloadURL);
-      setFormData(prev => ({
-        ...prev,
-        profile_image_url: downloadURL
-      }));
-      
-      // Clear the file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-      setImageFile(null);
-      
-      // Show success message
-      alert('Profile image uploaded successfully!');
-    } catch (error: any) {
-      console.error('Error uploading image:', error);
-      setError(error.message || 'Failed to upload image');
-    } finally {
-      setImageLoading(false);
-    }
-  };
-  
-  const handleSocialConnectSuccess = (platform: string, data: any) => {
-    // Update the profile state with the new data
-    setProfile(prev => {
-      if (!prev) return null;
-      
-      const verifiedPlatforms = prev.verified_platforms || [];
-      if (!verifiedPlatforms.includes(platform)) {
-        verifiedPlatforms.push(platform);
-      }
-      
-      return {
-        ...prev,
-        [`${platform}_connected`]: true,
-        [`${platform}_data`]: data,
-        followers: data.followers > (prev.followers || 0) ? data.followers : prev.followers,
-        verified_platforms: verifiedPlatforms
-      };
-    });
-    
-    // Show a success message
-    alert(`Successfully connected ${platform}!`);
-  };
-  
-  if (authLoading || loading) {
+
+  if (loading || isLoading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
+      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
       </div>
     );
   }
-  
-  if (!user) {
-    return (
-      <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold text-red-600 mb-4">Authentication Required</h2>
-        <p className="mb-4">You need to be logged in to view this page.</p>
-        <Link href="/auth/login" className="inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">
-          Go to Login
-        </Link>
-      </div>
-    );
-  }
-  
-  if (error && !profile && !isEditing) {
-    return (
-      <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold text-red-600 mb-4">Error Loading Profile</h2>
-        <p className="mb-4">{error}</p>
-        <button 
-          onClick={() => setIsEditing(true)} 
-          className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
-        >
-          Create Profile
-        </button>
-      </div>
-    );
-  }
-  
-  // If no profile exists yet, show the create form
-  if (!profile && !error) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="bg-white shadow-lg rounded-lg p-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Create Your Influencer Profile</h2>
-          
-          {error && (
-            <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
-              <p>{error}</p>
-            </div>
-          )}
-          
-          <form onSubmit={handleSubmit}>
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Profile Image</label>
-              <div className="flex items-center">
-                <div className="relative h-24 w-24 rounded-full overflow-hidden bg-gray-100 mr-4">
-                  {profileImage ? (
-                    <Image 
-                      src={profileImage} 
-                      alt="Profile" 
-                      fill
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center">
-                      <svg className="h-12 w-12 text-gray-300" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept="image/*"
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                  />
-                  {imageFile && (
-                    <button
-                      type="button"
-                      onClick={handleImageUpload}
-                      disabled={imageLoading}
-                      className="mt-2 inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                      {imageLoading ? 'Uploading...' : 'Upload'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              <div>
-                <label htmlFor="full_name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  id="full_name"
-                  name="full_name"
-                  value={formData.full_name}
-                  onChange={handleInputChange}
-                  required
-                  className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="platform" className="block text-sm font-medium text-gray-700 mb-1">Primary Platform</label>
-                <input
-                  type="text"
-                  id="platform"
-                  name="platform"
-                  value={formData.platform}
-                  onChange={handleInputChange}
-                  placeholder="Instagram, TikTok, YouTube, etc."
-                  className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                />
-              </div>
-              
-              <div className="md:col-span-2">
-                <label htmlFor="niche" className="block text-sm font-medium text-gray-700 mb-1">Content Niche</label>
-                <input
-                  type="text"
-                  id="niche"
-                  name="niche"
-                  value={formData.niche}
-                  onChange={handleInputChange}
-                  placeholder="Fashion, Beauty, Tech, etc."
-                  className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                />
-              </div>
-            </div>
-            
-            <div className="mt-6">
-              <label htmlFor="bio" className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
-              <textarea
-                id="bio"
-                name="bio"
-                rows={4}
-                value={formData.bio}
-                onChange={handleInputChange}
-                className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-              ></textarea>
-            </div>
-            
-            <div className="mt-6 flex justify-end">
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-              >
-                {loading ? 'Saving...' : 'Create Profile'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
-  
+
   return (
-    <div className="bg-gray-50 min-h-screen pb-12">
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <Link 
-            href="/influencer/dashboard" 
-            className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
-          >
-            <svg className="mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-            </svg>
-            Back to Dashboard
-          </Link>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-4">
+              <Link
+                href="/influencer/dashboard"
+                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Dashboard
+              </Link>
+              <h1 className="text-2xl font-bold text-gray-900">Your Profile</h1>
+            </div>
+            <button
+              onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+              disabled={isSaving}
+              className={`inline-flex items-center px-4 py-2 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
+                isEditing 
+                  ? 'border-transparent text-white bg-indigo-600 hover:bg-indigo-700' 
+                  : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+              }`}
+            >
+              {isSaving ? 'Saving...' : isEditing ? 'Save Profile' : 'Edit Profile'}
+            </button>
+          </div>
         </div>
-        
-        {!isEditing && profile ? (
-          <div className="bg-white shadow-lg rounded-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-500 to-indigo-600 px-6 py-12 relative">
-              <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2">
-                <div className="relative h-32 w-32 rounded-full overflow-hidden bg-white border-4 border-white shadow-lg">
-                  {profileImage ? (
-                    <Image 
-                      src={profileImage} 
-                      alt={profile.full_name} 
-                      fill
-                      className="object-cover"
-                    />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center bg-gray-100">
-                      <svg className="h-16 w-16 text-gray-300" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
-                      </svg>
-                    </div>
-                  )}
-                </div>
+      </header>
+
+      {/* Main content */}
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
               </div>
-            </div>
-            
-            <div className="pt-20 px-6 pb-6">
-              <div className="text-center mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">{profile.full_name}</h1>
-                <div className="flex items-center justify-center mt-1 space-x-2">
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                    {profile.platform}
-                  </span>
-                  {profile.verified_platforms && profile.verified_platforms.length > 0 && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                      <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      Verified
-                    </span>
-                  )}
-                  <span className="text-gray-500">•</span>
-                  <span className="text-gray-500">{profile.followers?.toLocaleString() || 0} followers</span>
-                </div>
-                <p className="mt-2 text-sm text-gray-500">{profile.niche}</p>
+              <div className="ml-3">
+                <p className="text-sm text-red-700">{error}</p>
               </div>
-              
-              <div className="border-t border-gray-200 pt-4">
-                <h2 className="text-lg font-medium text-gray-900 mb-2">Bio</h2>
-                <p className="text-gray-700 whitespace-pre-line">{profile.bio || 'No bio provided.'}</p>
-              </div>
-              
-              <div className="mt-6 flex justify-center">
-                <button 
-                  onClick={() => setIsEditing(true)}
-                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                >
-                  <svg className="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                  </svg>
-                  Edit Profile
-                </button>
-              </div>
-            </div>
-            
-            <div className="mt-8">
-              <SocialMediaConnect 
-                onSuccess={handleSocialConnectSuccess}
-                connectedAccounts={{
-                  youtube: profile.youtube_connected,
-                  instagram: profile.instagram_connected,
-                  tiktok: profile.tiktok_connected,
-                  twitter: profile.twitter_connected,
-                  twitch: profile.twitch_connected
-                }}
-              />
             </div>
           </div>
-        ) : (
-          <div className="bg-white shadow-lg rounded-lg p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Edit Your Profile</h2>
-            
-            {error && (
-              <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
-                <p>{error}</p>
-              </div>
+        )}
+
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+          <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
+            <div>
+              <h3 className="text-lg leading-6 font-medium text-gray-900">Influencer Profile</h3>
+              <p className="mt-1 max-w-2xl text-sm text-gray-500">
+                Your public profile information that will be visible to brands.
+              </p>
+            </div>
+            {isEditing && (
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
             )}
-            
-            <form onSubmit={handleSubmit}>
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Profile Image</label>
-                <div className="flex items-center">
-                  <div className="relative h-24 w-24 rounded-full overflow-hidden bg-gray-100 mr-4">
-                    {profileImage ? (
-                      <Image 
-                        src={profileImage} 
-                        alt="Profile" 
+          </div>
+
+          <div className="border-t border-gray-200 px-4 py-5 sm:p-6">
+            <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
+              {/* Profile Image */}
+              <div className="sm:col-span-6">
+                <label className="block text-sm font-medium text-gray-700">Profile Image</label>
+                <div className="mt-2 flex items-center">
+                  <div className="relative h-40 w-40 rounded-full overflow-hidden bg-gray-100">
+                    {(profile?.profile_image_url || imagePreview) ? (
+                      <Image
+                        src={imagePreview || profile?.profile_image_url || ''}
+                        alt="Profile"
                         fill
                         className="object-cover"
                       />
                     ) : (
-                      <div className="h-full w-full flex items-center justify-center">
-                        <svg className="h-12 w-12 text-gray-300" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
-                        </svg>
-                      </div>
+                      <svg className="h-full w-full text-gray-300" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" />
+                      </svg>
                     )}
                   </div>
-                  
-                  <div>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      accept="image/*"
-                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                    />
-                    {imageFile && (
+                  {isEditing && (
+                    <div className="ml-5">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleImageChange}
+                        accept="image/*"
+                        className="hidden"
+                      />
                       <button
                         type="button"
-                        onClick={handleImageUpload}
-                        disabled={imageLoading}
-                        className="mt-2 inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        onClick={triggerFileInput}
+                        className="bg-white py-2 px-3 border border-gray-300 rounded-md shadow-sm text-sm leading-4 font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                       >
-                        {imageLoading ? 'Uploading...' : 'Upload'}
+                        Change Image
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
-              
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div>
-                  <label htmlFor="full_name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+
+              {/* Full Name */}
+              <div className="sm:col-span-3">
+                <label htmlFor="full_name" className="block text-sm font-medium text-gray-700">
+                  Full Name
+                </label>
+                {isEditing ? (
                   <input
                     type="text"
-                    id="full_name"
                     name="full_name"
-                    value={formData.full_name}
-                    onChange={handleInputChange}
-                    required
-                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    id="full_name"
+                    value={profile?.full_name || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   />
-                </div>
-                
-                <div>
-                  <label htmlFor="platform" className="block text-sm font-medium text-gray-700 mb-1">Primary Platform</label>
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">{profile?.full_name || 'Not specified'}</p>
+                )}
+              </div>
+
+              {/* Location */}
+              <div className="sm:col-span-3">
+                <label htmlFor="location" className="block text-sm font-medium text-gray-700">
+                  Location
+                </label>
+                {isEditing ? (
                   <input
                     type="text"
+                    name="location"
+                    id="location"
+                    value={profile?.location || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="City, State/Country"
+                  />
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">{profile?.location || 'Not specified'}</p>
+                )}
+              </div>
+
+              {/* Primary Platform */}
+              <div className="sm:col-span-3">
+                <label htmlFor="platform" className="block text-sm font-medium text-gray-700">
+                  Primary Platform
+                </label>
+                {isEditing ? (
+                  <select
                     id="platform"
                     name="platform"
-                    value={formData.platform}
-                    onChange={handleInputChange}
-                    placeholder="Instagram, TikTok, YouTube, etc."
-                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  />
-                </div>
-                
-                <div className="md:col-span-2">
-                  <label htmlFor="niche" className="block text-sm font-medium text-gray-700 mb-1">Content Niche</label>
+                    value={profile?.platform || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  >
+                    <option value="">Select a platform</option>
+                    {platformOptions.map(platform => (
+                      <option key={platform} value={platform}>{platform}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">{profile?.platform || 'Not specified'}</p>
+                )}
+              </div>
+
+              {/* Followers */}
+              <div className="sm:col-span-3">
+                <label htmlFor="followers" className="block text-sm font-medium text-gray-700">
+                  Followers
+                </label>
+                {isEditing ? (
                   <input
-                    type="text"
+                    type="number"
+                    name="followers"
+                    id="followers"
+                    value={profile?.followers || ''}
+                    onChange={handleNumberChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    min="0"
+                  />
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">
+                    {profile?.followers ? profile.followers.toLocaleString() : 'Not specified'}
+                  </p>
+                )}
+              </div>
+
+              {/* Niche */}
+              <div className="sm:col-span-3">
+                <label htmlFor="niche" className="block text-sm font-medium text-gray-700">
+                  Niche/Category
+                </label>
+                {isEditing ? (
+                  <select
                     id="niche"
                     name="niche"
-                    value={formData.niche}
-                    onChange={handleInputChange}
-                    placeholder="Fashion, Beauty, Tech, etc."
-                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    value={profile?.niche || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  >
+                    <option value="">Select a niche</option>
+                    {nicheOptions.map(niche => (
+                      <option key={niche} value={niche}>{niche}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">{profile?.niche || 'Not specified'}</p>
+                )}
+              </div>
+
+              {/* Engagement Rate */}
+              <div className="sm:col-span-3">
+                <label htmlFor="engagement_rate" className="block text-sm font-medium text-gray-700">
+                  Engagement Rate (%)
+                </label>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    name="engagement_rate"
+                    id="engagement_rate"
+                    value={profile?.engagement_rate || ''}
+                    onChange={handleNumberChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    min="0"
+                    max="100"
+                    step="0.1"
                   />
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">
+                    {profile?.engagement_rate ? `${profile.engagement_rate}%` : 'Not specified'}
+                  </p>
+                )}
+              </div>
+
+              {/* Average Likes */}
+              <div className="sm:col-span-3">
+                <label htmlFor="avg_likes" className="block text-sm font-medium text-gray-700">
+                  Average Likes per Post
+                </label>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    name="avg_likes"
+                    id="avg_likes"
+                    value={profile?.avg_likes || ''}
+                    onChange={handleNumberChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    min="0"
+                  />
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">
+                    {profile?.avg_likes ? profile.avg_likes.toLocaleString() : 'Not specified'}
+                  </p>
+                )}
+              </div>
+
+              {/* Audience Demographics */}
+              <div className="sm:col-span-6">
+                <label htmlFor="audience_demographics" className="block text-sm font-medium text-gray-700">
+                  Audience Demographics
+                </label>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    name="audience_demographics"
+                    id="audience_demographics"
+                    value={profile?.audience_demographics || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="e.g. Mixed 16-34 (75%)"
+                  />
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900">{profile?.audience_demographics || 'Not specified'}</p>
+                )}
+              </div>
+
+              {/* Bio */}
+              <div className="sm:col-span-6">
+                <label htmlFor="bio" className="block text-sm font-medium text-gray-700">
+                  Bio
+                </label>
+                {isEditing ? (
+                  <textarea
+                    id="bio"
+                    name="bio"
+                    rows={4}
+                    value={profile?.bio || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="Tell brands about yourself..."
+                  />
+                ) : (
+                  <p className="mt-1 text-sm text-gray-900 whitespace-pre-line">{profile?.bio || 'No bio provided'}</p>
+                )}
+              </div>
+
+              {/* Platform Connections Section */}
+              <div className="sm:col-span-6 border-t border-gray-200 pt-5">
+                <h3 className="text-lg font-medium text-gray-900">Platform Connections</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Connect your social media accounts to verify your following and engagement metrics.
+                </p>
+                
+                <div className="mt-4 space-y-4">
+                  {['Instagram', 'YouTube', 'TikTok', 'Twitter', 'Twitch'].map(platform => {
+                    const platformKey = platform.toLowerCase() as 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'twitch';
+                    const isConnected = profile?.[`${platformKey}_connected`];
+                    
+                    return (
+                      <div key={platform} className="flex items-center justify-between py-3 border-b border-gray-200">
+                        <div className="flex items-center">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            isConnected ? 'bg-green-100' : 'bg-gray-100'
+                          }`}>
+                            {/* Platform icon would go here */}
+                            <span className={isConnected ? 'text-green-600' : 'text-gray-400'}>
+                              {platform.charAt(0)}
+                            </span>
+                          </div>
+                          <div className="ml-3">
+                            <p className="text-sm font-medium text-gray-900">{platform}</p>
+                            <p className="text-xs text-gray-500">
+                              {isConnected ? 'Connected' : 'Not connected'}
+                            </p>
+                          </div>
+                        </div>
+                        {isEditing && (
+                          <button
+                            type="button"
+                            className={`inline-flex items-center px-3 py-1.5 border text-xs font-medium rounded-md ${
+                              isConnected 
+                                ? 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50' 
+                                : 'border-transparent text-white bg-indigo-600 hover:bg-indigo-700'
+                            }`}
+                          >
+                            {isConnected ? 'Disconnect' : 'Connect'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              
-              <div className="mt-6">
-                <label htmlFor="bio" className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
-                <textarea
-                  id="bio"
-                  name="bio"
-                  rows={4}
-                  value={formData.bio}
-                  onChange={handleInputChange}
-                  className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                ></textarea>
-              </div>
-              
-              <div className="mt-4 p-3 bg-blue-50 rounded-md">
-                <p className="text-sm text-blue-700">
-                  <svg className="inline-block h-4 w-4 mr-1 -mt-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                  Follower counts are automatically updated when you connect your social media accounts.
-                </p>
-              </div>
-              
-              <div className="mt-6 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                >
-                  {loading ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        )}
-      </div>
+
+          {isEditing && (
+            <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+              >
+                {isSaving ? 'Saving...' : 'Save Profile'}
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 } 

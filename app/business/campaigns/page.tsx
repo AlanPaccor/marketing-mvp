@@ -79,7 +79,18 @@ export default function Campaigns() {
       <header className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">Your Campaigns</h1>
+            <div className="flex items-center space-x-4">
+              <Link
+                href="/business/dashboard"
+                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Dashboard
+              </Link>
+              <h1 className="text-2xl font-bold text-gray-900">Your Campaigns</h1>
+            </div>
             <Link
               href="/business/campaigns/create"
               className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
@@ -172,4 +183,4 @@ export default function Campaigns() {
       </main>
     </div>
   );
-} 
+}

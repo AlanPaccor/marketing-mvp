@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/app/context/AuthContext';
 
-// Update the interface to include profile_image_url
+// Update the interface to include more business profile fields
 interface BusinessProfile {
   id: string;
   user_id: string;
@@ -18,8 +18,24 @@ interface BusinessProfile {
   location: string;
   description: string;
   profile_image_url?: string;
+  founded_year?: number;
+  company_size?: string;
+  social_media?: {
+    linkedin?: string;
+    twitter?: string;
+    instagram?: string;
+    facebook?: string;
+  };
+  contact_email?: string;
+  contact_phone?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+interface UserData {
+  id: string;
+  uid: string;
+  // other user properties
 }
 
 export default function BusinessProfile() {
@@ -41,7 +57,17 @@ export default function BusinessProfile() {
     location: '',
     description: '',
     profile_image_url: '',
+    founded_year: '',
+    company_size: '',
+    linkedin: '',
+    twitter: '',
+    instagram: '',
+    facebook: '',
+    contact_email: '',
+    contact_phone: '',
   });
+
+  const [emailError, setEmailError] = useState('');
 
   useEffect(() => {
     async function loadProfile() {
@@ -55,7 +81,7 @@ export default function BusinessProfile() {
       const { data, error } = await fetchUserProfile('business_profiles');
       
       if (error) {
-        setError(error.message);
+        setError(error.message || 'An error occurred');
       } else {
         setProfile(data);
         if (data) {
@@ -66,6 +92,14 @@ export default function BusinessProfile() {
             location: data.location || '',
             description: data.description || '',
             profile_image_url: data.profile_image_url || '',
+            founded_year: data.founded_year?.toString() || '',
+            company_size: data.company_size || '',
+            linkedin: data.social_media?.linkedin || '',
+            twitter: data.social_media?.twitter || '',
+            instagram: data.social_media?.instagram || '',
+            facebook: data.social_media?.facebook || '',
+            contact_email: data.contact_email || '',
+            contact_phone: data.contact_phone || '',
           });
           
           // Set the profile image if it exists
@@ -94,12 +128,26 @@ export default function BusinessProfile() {
     loadProfile();
   }, [user]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    
+    // Clear previous errors
+    if (name === 'contact_email') {
+      setEmailError('');
+    }
+    
     setFormData({
       ...formData,
       [name]: value
     });
+    
+    // Validate email as user types
+    if (name === 'contact_email' && value) {
+      const regex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+      if (!regex.test(value) && value !== '') {
+        setEmailError('Please enter a valid email address');
+      }
+    }
   };
   
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,24 +215,50 @@ export default function BusinessProfile() {
     }
   };
   
+  // Add this function to validate the email
+  const validateEmail = (email: string): boolean => {
+    if (!email) return true; // Allow empty email
+    const regex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    return regex.test(email);
+  };
+  
+  // Add validation to your form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate email before submission
+    if (formData.contact_email && !validateEmail(formData.contact_email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    
     setIsLoading(true);
     
     try {
-      // If there's a new image, upload it first
-      if (imageFile) {
-        await handleImageUpload();
-      }
+      // Validate email format or set to null if empty
+      const profileData = {
+        ...formData,
+        founded_year: formData.founded_year ? parseInt(formData.founded_year) : null,
+        contact_email: formData.contact_email.trim() === '' ? null : formData.contact_email,
+        social_media: {
+          linkedin: formData.linkedin,
+          twitter: formData.twitter,
+          instagram: formData.instagram,
+          facebook: formData.facebook,
+        }
+      };
+      
+      // Remove the individual social media fields from the top level
+      const { linkedin, twitter, instagram, facebook, ...dataToSubmit } = profileData;
       
       let result;
       
       if (profile) {
         // Update existing profile
-        result = await updateUserProfile('business_profiles', formData);
+        result = await updateUserProfile('business_profiles', dataToSubmit);
       } else {
         // Create new profile
-        result = await createUserProfile('business_profiles', formData);
+        result = await createUserProfile('business_profiles', dataToSubmit);
       }
       
       if (result.error) {
@@ -195,7 +269,7 @@ export default function BusinessProfile() {
       setIsEditing(false);
       // Show success message
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'An error occurred');
     } finally {
       setIsLoading(false);
     }
@@ -311,6 +385,64 @@ export default function BusinessProfile() {
                     {profile?.description || 'No description provided'}
                   </dd>
                 </div>
+                
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Founded Year</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.founded_year || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Company Size</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.company_size || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Contact Email</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.contact_email || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Contact Phone</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    {profile?.contact_phone || 'Not provided'}
+                  </dd>
+                </div>
+                
+                <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                  <dt className="text-sm font-medium text-gray-500">Social Media</dt>
+                  <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                    <div className="flex space-x-4">
+                      {profile?.social_media?.linkedin && (
+                        <a href={profile.social_media.linkedin} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                          LinkedIn
+                        </a>
+                      )}
+                      {profile?.social_media?.twitter && (
+                        <a href={profile.social_media.twitter} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-600">
+                          Twitter
+                        </a>
+                      )}
+                      {profile?.social_media?.instagram && (
+                        <a href={profile.social_media.instagram} target="_blank" rel="noopener noreferrer" className="text-pink-600 hover:text-pink-800">
+                          Instagram
+                        </a>
+                      )}
+                      {profile?.social_media?.facebook && (
+                        <a href={profile.social_media.facebook} target="_blank" rel="noopener noreferrer" className="text-blue-800 hover:text-blue-900">
+                          Facebook
+                        </a>
+                      )}
+                      {!profile?.social_media?.linkedin && !profile?.social_media?.twitter && 
+                       !profile?.social_media?.instagram && !profile?.social_media?.facebook && 'Not provided'}
+                    </div>
+                  </dd>
+                </div>
               </dl>
             </div>
           ) : (
@@ -417,6 +549,110 @@ export default function BusinessProfile() {
                     rows={4}
                     className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   ></textarea>
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Founded Year</label>
+                  <input
+                    type="number"
+                    name="founded_year"
+                    value={formData.founded_year}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Company Size</label>
+                  <select
+                    name="company_size"
+                    value={formData.company_size}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  >
+                    <option value="">Select company size</option>
+                    <option value="1-10">1-10 employees</option>
+                    <option value="11-50">11-50 employees</option>
+                    <option value="51-200">51-200 employees</option>
+                    <option value="201-500">201-500 employees</option>
+                    <option value="501-1000">501-1000 employees</option>
+                    <option value="1001+">1001+ employees</option>
+                  </select>
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Contact Email</label>
+                  <input
+                    type="email"
+                    name="contact_email"
+                    value={formData.contact_email}
+                    onChange={handleInputChange}
+                    className={`mt-1 block w-full border ${emailError ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm`}
+                  />
+                  {emailError && (
+                    <p className="mt-1 text-sm text-red-600">{emailError}</p>
+                  )}
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Contact Phone</label>
+                  <input
+                    type="tel"
+                    name="contact_phone"
+                    value={formData.contact_phone}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Social Media</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                    <div>
+                      <label className="block text-xs text-gray-500">LinkedIn</label>
+                      <input
+                        type="url"
+                        name="linkedin"
+                        value={formData.linkedin}
+                        onChange={handleInputChange}
+                        placeholder="https://linkedin.com/company/..."
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500">Twitter</label>
+                      <input
+                        type="url"
+                        name="twitter"
+                        value={formData.twitter}
+                        onChange={handleInputChange}
+                        placeholder="https://twitter.com/..."
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500">Instagram</label>
+                      <input
+                        type="url"
+                        name="instagram"
+                        value={formData.instagram}
+                        onChange={handleInputChange}
+                        placeholder="https://instagram.com/..."
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500">Facebook</label>
+                      <input
+                        type="url"
+                        name="facebook"
+                        value={formData.facebook}
+                        onChange={handleInputChange}
+                        placeholder="https://facebook.com/..."
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
                 
                 <div className="flex justify-end space-x-3">
