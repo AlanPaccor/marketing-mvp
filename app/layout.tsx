@@ -17,7 +17,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <head>
+        {/* Add any head elements here */}
+      </head>
+      <body className="min-h-screen bg-gray-50">
         <AuthProvider>
           {children}
         </AuthProvider>
