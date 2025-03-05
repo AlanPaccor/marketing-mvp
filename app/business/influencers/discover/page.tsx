@@ -62,6 +62,13 @@ export default function DiscoverInfluencers() {
       // Build the query
       let query = supabase.from('influencer_profiles').select('*');
       
+      // Check if any filters are applied
+      const hasFilters = filters.platform || 
+                        filters.niche || 
+                        filters.minFollowers || 
+                        filters.maxFollowers || 
+                        filters.searchQuery;
+      
       // Apply filters if they exist
       if (filters.platform) {
         query = query.eq('platform', filters.platform);
@@ -82,6 +89,27 @@ export default function DiscoverInfluencers() {
       if (filters.searchQuery) {
         query = query.or(`full_name.ilike.%${filters.searchQuery}%,bio.ilike.%${filters.searchQuery}%`);
       }
+      
+      // If no filters are applied, order by random
+      if (!hasFilters) {
+        // Use the correct syntax for random ordering in Supabase
+        const { data, error } = await query.limit(12);
+        
+        if (error) {
+          throw error;
+        }
+        
+        // Randomize the results client-side if no filters are applied
+        const randomizedData = data ? [...data].sort(() => Math.random() - 0.5) : [];
+        setInfluencers(randomizedData);
+        return; // Exit early since we've already set the influencers
+      } else {
+        // With filters, sort by followers (descending) as a default sort
+        query = query.order('followers', { ascending: false });
+      }
+      
+      // Limit the number of results to prevent loading too many
+      query = query.limit(12);
       
       const { data, error } = await query;
       
