@@ -23,6 +23,7 @@ interface CampaignFormData {
   requirements: string;
   contentGuidelines: string;
   platformPreferences: string[];
+  isPublic: boolean;
 }
 
 // Add this type definition at the top of your file
@@ -58,6 +59,7 @@ export default function CreateCampaign() {
     requirements: '',
     contentGuidelines: '',
     platformPreferences: [],
+    isPublic: true,
   });
 
   // Available options for form selections
@@ -179,6 +181,15 @@ export default function CreateCampaign() {
     }
   };
 
+  // Add a handler for checkbox changes
+  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, checked } = e.target;
+    setFormData({
+      ...formData,
+      [name]: checked
+    });
+  };
+
   // Navigate to next step
   const nextStep = () => {
     if (validateCurrentStep()) {
@@ -297,6 +308,7 @@ export default function CreateCampaign() {
         requirements: formData.requirements,
         content_guidelines: formData.contentGuidelines,
         platform_preferences: formData.platformPreferences,
+        is_public: formData.isPublic,
         status: 'draft',
         created_at: new Date().toISOString(),
       };
@@ -450,7 +462,7 @@ export default function CreateCampaign() {
                     {step === 2 && 'Budget & Timeline'}
                     {step === 3 && 'Target Audience'}
                     {step === 4 && 'Requirements'}
-                    {step === 5 && 'Review'}
+                    {step === 5 && 'Done'}
                   </span>
                 </div>
               ))}
@@ -726,6 +738,23 @@ export default function CreateCampaign() {
                   ></textarea>
                 </div>
                 
+                <div className="flex items-start">
+                  <div className="flex items-center h-5">
+                    <input
+                      id="isPublic"
+                      name="isPublic"
+                      type="checkbox"
+                      checked={formData.isPublic}
+                      onChange={handleCheckboxChange}
+                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                    />
+                  </div>
+                  <div className="ml-3 text-sm">
+                    <label htmlFor="isPublic" className="font-medium text-gray-700">Public Campaign</label>
+                    <p className="text-gray-500">Make this campaign visible to all influencers who can apply directly. If unchecked, the campaign will be private and invitation-only.</p>
+                  </div>
+                </div>
+                
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Preferred Platforms <span className="text-red-500">*</span>
@@ -819,6 +848,13 @@ export default function CreateCampaign() {
                     )}
 
                     <div className="py-3 grid grid-cols-3 gap-4">
+                      <dt className="text-sm font-medium text-gray-500">Campaign Visibility</dt>
+                      <dd className="text-sm text-gray-900 col-span-2">
+                        {formData.isPublic ? 'Public - Open for applications' : 'Private - Invitation only'}
+                      </dd>
+                    </div>
+
+                    <div className="py-3 grid grid-cols-3 gap-4">
                       <dt className="text-sm font-medium text-gray-500">Platforms</dt>
                       <dd className="text-sm text-gray-900 col-span-2">{formData.platformPreferences.join(', ')}</dd>
                     </div>
@@ -846,7 +882,7 @@ export default function CreateCampaign() {
                     onClick={nextStep}
                     className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                   >
-                    Next
+                    Create Campaign
                   </button>
                 ) : (
                   <button
