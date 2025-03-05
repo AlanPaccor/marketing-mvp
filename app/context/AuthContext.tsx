@@ -223,4 +223,9 @@ const createUser = async (firebaseUid: string, email: string, userType: string) 
     console.error('Exception creating user:', err);
     throw err;
   }
+};
+
+export const useFirebaseUser = () => {
+  const auth = getAuth();
+  return auth.currentUser;
 }; 
