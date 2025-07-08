@@ -6,6 +6,8 @@ import { useAuth } from '@/app/context/AuthContext';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/app/supabase/client';
+import { spendTokens, getTokenBalance } from '@/app/utils/tokens';
+import { notifyInfluencerOfContact } from '@/app/utils/notifications';
 
 interface Influencer {
   id: string;
@@ -25,6 +27,12 @@ export default function InfluencerDetail() {
   const [influencer, setInfluencer] = useState<Influencer | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [userTokens, setUserTokens] = useState(0);
+  const [contactCost, setContactCost] = useState(0);
+  const [contactSuccess, setContactSuccess] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [contactMessage, setContactMessage] = useState('');
   
   useEffect(() => {
     if (!loading) {
@@ -42,6 +50,8 @@ export default function InfluencerDetail() {
       
       // Fetch influencer details
       fetchInfluencerDetails();
+      // Fetch user's token balance
+      fetchUserTokens();
     }
   }, [user, loading, router, params]);
   
@@ -65,6 +75,106 @@ export default function InfluencerDetail() {
       setError(err.message);
     } finally {
       setIsLoading(false);
+    }
+  };
+  
+  const fetchUserTokens = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('business_profiles')
+        .select('tokens')
+        .eq('user_id', user?.id)
+        .single();
+      
+      if (error) {
+        throw error;
+      }
+      
+      setUserTokens(data?.tokens || 0);
+    } catch (err: any) {
+      console.error('Error fetching token balance:', err);
+    }
+  };
+  
+  const calculateContactCost = (followers: number) => {
+    // Base cost is 100 tokens
+    const baseCost = 100;
+    
+    // Calculate additional cost based on followers
+    // For example: 100 + (followers / 10000) capped at 800
+    let additionalCost = Math.floor(followers / 10000);
+    
+    // Cap the total cost at 800 tokens
+    const totalCost = Math.min(baseCost + additionalCost, 800);
+    
+    return totalCost;
+  };
+  
+  useEffect(() => {
+    if (influencer) {
+      const cost = calculateContactCost(influencer.followers);
+      setContactCost(cost);
+    }
+  }, [influencer]);
+  
+  const handleContactClick = () => {
+    setShowContactModal(true);
+  };
+  
+  const handleConfirmContact = async () => {
+    if (!influencer) return;
+    
+    try {
+      // Use the token utility function to handle the transaction
+      const success = await spendTokens(
+        user?.id as string,
+        contactCost,
+        `Contact influencer: ${influencer.full_name}`,
+        'influencer_contact',
+        influencer.id
+      );
+      
+      if (!success) {
+        throw new Error('Failed to process token transaction');
+      }
+      
+      // Create a record of the contact
+      const { error: contactError } = await supabase
+        .from('influencer_contacts')
+        .insert({
+          business_id: user?.id,
+          influencer_id: influencer.id,
+          status: 'pending',
+          message: contactMessage,
+          tokens_spent: contactCost,
+          created_at: new Date().toISOString()
+        });
+        
+      if (contactError) throw contactError;
+      
+      // Notify the influencer
+      await notifyInfluencerOfContact(
+        influencer.user_id,
+        user?.id as string,
+        user?.displayName || 'A business'
+      );
+      
+      // Update local token count
+      const newBalance = await getTokenBalance(user?.id as string);
+      setUserTokens(newBalance);
+      
+      // Close the modal and show success message
+      setShowContactModal(false);
+      setContactSuccess(true);
+      
+      // Reset after a few seconds
+      setTimeout(() => {
+        setContactSuccess(false);
+      }, 3000);
+      
+    } catch (err) {
+      console.error('Error contacting influencer:', err);
+      setContactError('Failed to contact influencer. Please try again.');
     }
   };
   
@@ -116,12 +226,17 @@ export default function InfluencerDetail() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">Influencer Profile</h1>
-            <Link 
-              href="/business/influencers/discover" 
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
-            >
-              Back to Discover
-            </Link>
+            <div className="flex items-center">
+              <span className="mr-4 text-sm font-medium text-gray-600">
+                Your Tokens: <span className="text-indigo-600 font-bold">{userTokens}</span>
+              </span>
+              <Link 
+                href="/business/influencers/discover" 
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
+              >
+                Back to Discover
+              </Link>
+            </div>
           </div>
         </div>
       </header>
@@ -189,14 +304,78 @@ export default function InfluencerDetail() {
               </button>
               <button
                 type="button"
+                onClick={handleContactClick}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
-                Contact Influencer
+                Contact for {contactCost} Tokens
               </button>
             </div>
           </div>
         </div>
       </main>
+      
+      {/* Contact Modal */}
+      {showContactModal && (
+        <div className="fixed z-10 inset-0 overflow-y-auto">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+            
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="sm:flex sm:items-start">
+                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-indigo-100 sm:mx-0 sm:h-10 sm:w-10">
+                    <svg className="h-6 w-6 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900">
+                      Contact Influencer
+                    </h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500">
+                        You are about to spend <span className="font-bold">{contactCost} tokens</span> to contact {influencer?.full_name}. 
+                        This will allow you to send a direct message and proposal to this influencer.
+                      </p>
+                      <p className="mt-2 text-sm text-gray-500">
+                        Your current balance: <span className="font-bold">{userTokens} tokens</span>
+                      </p>
+                      {userTokens < contactCost && (
+                        <p className="mt-2 text-sm text-red-500 font-medium">
+                          You don't have enough tokens. Please purchase more tokens to continue.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={handleConfirmContact}
+                  disabled={userTokens < contactCost}
+                  className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm ${
+                    userTokens >= contactCost ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-indigo-300 cursor-not-allowed'
+                  }`}
+                >
+                  Confirm ({contactCost} Tokens)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowContactModal(false)}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

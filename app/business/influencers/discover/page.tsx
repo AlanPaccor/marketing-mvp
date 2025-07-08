@@ -24,6 +24,7 @@ export default function DiscoverInfluencers() {
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userTokens, setUserTokens] = useState(0);
   const [filters, setFilters] = useState({
     platform: '',
     niche: '',
@@ -31,6 +32,8 @@ export default function DiscoverInfluencers() {
     maxFollowers: '',
     searchQuery: ''
   });
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
   
   // Available filter options
   const platforms = ['Instagram', 'TikTok', 'YouTube', 'Twitter', 'Other'];
@@ -52,6 +55,8 @@ export default function DiscoverInfluencers() {
       
       // Fetch influencers
       fetchInfluencers();
+      // Fetch user's token balance
+      fetchUserTokens();
     }
   }, [user, loading, router]);
   
@@ -126,6 +131,38 @@ export default function DiscoverInfluencers() {
     }
   };
   
+  const fetchUserTokens = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('business_profiles')
+        .select('tokens')
+        .eq('user_id', user?.id)
+        .single();
+      
+      if (error) {
+        throw error;
+      }
+      
+      setUserTokens(data?.tokens || 0);
+    } catch (err: any) {
+      console.error('Error fetching token balance:', err);
+    }
+  };
+  
+  const calculateContactCost = (followers: number) => {
+    // Base cost is 100 tokens
+    const baseCost = 100;
+    
+    // Calculate additional cost based on followers
+    // For example: 100 + (followers / 10000) capped at 800
+    let additionalCost = Math.floor(followers / 10000);
+    
+    // Cap the total cost at 800 tokens
+    const totalCost = Math.min(baseCost + additionalCost, 800);
+    
+    return totalCost;
+  };
+  
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFilters(prev => ({
@@ -161,6 +198,61 @@ export default function DiscoverInfluencers() {
       return (count / 1000).toFixed(1) + 'K';
     }
     return count.toString();
+  };
+  
+  const handleContactClick = (influencer: Influencer) => {
+    setSelectedInfluencer(influencer);
+    setShowContactModal(true);
+  };
+  
+  const handleConfirmContact = async () => {
+    if (!selectedInfluencer) return;
+    
+    try {
+      const contactCost = calculateContactCost(selectedInfluencer.followers);
+      
+      // Check if user has enough tokens
+      if (userTokens < contactCost) {
+        alert('You do not have enough tokens to contact this influencer.');
+        return;
+      }
+      
+      // Deduct tokens from user's balance
+      const { error: updateError } = await supabase
+        .from('business_profiles')
+        .update({ tokens: userTokens - contactCost })
+        .eq('user_id', user?.id);
+      
+      if (updateError) {
+        throw updateError;
+      }
+      
+      // Record the contact in the database
+      const { error: contactError } = await supabase
+        .from('influencer_contacts')
+        .insert({
+          business_id: user?.id,
+          influencer_id: selectedInfluencer.user_id,
+          tokens_spent: contactCost,
+          status: 'pending',
+          created_at: new Date()
+        });
+      
+      if (contactError) {
+        throw contactError;
+      }
+      
+      // Update local token count
+      setUserTokens(userTokens - contactCost);
+      
+      // Close modal and show success message
+      setShowContactModal(false);
+      alert('Contact request sent successfully!');
+      
+    } catch (err: any) {
+      console.error('Error processing contact request:', err);
+      alert('Failed to process your request. Please try again.');
+    }
   };
   
   if (loading || isLoading) {
@@ -209,6 +301,11 @@ export default function DiscoverInfluencers() {
                   Analytics
                 </Link>
               </div>
+            </div>
+            <div className="flex items-center">
+              <span className="text-sm font-medium text-gray-600">
+                Your Tokens: <span className="text-indigo-600 font-bold">{userTokens}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -353,63 +450,131 @@ export default function DiscoverInfluencers() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {influencers.map((influencer) => (
-              <div key={influencer.id} className="bg-white overflow-hidden shadow rounded-lg">
-                <div className="px-4 py-5 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex-shrink-0 h-16 w-16 rounded-full overflow-hidden bg-gray-100">
-                      {influencer.profile_image_url ? (
-                        <Image 
-                          src={influencer.profile_image_url} 
-                          alt={influencer.full_name} 
-                          width={64} 
-                          height={64} 
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="h-full w-full flex items-center justify-center">
-                          <span className="text-xl font-semibold text-gray-500">
-                            {influencer.full_name.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="ml-4">
-                      <h3 className="text-lg font-medium text-gray-900">{influencer.full_name}</h3>
-                      <div className="flex items-center mt-1">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                          {influencer.platform}
-                        </span>
-                        <span className="ml-2 text-sm text-gray-500">{formatFollowers(influencer.followers)} followers</span>
+            {influencers.map((influencer) => {
+              const contactCost = calculateContactCost(influencer.followers);
+              
+              return (
+                <div key={influencer.id} className="bg-white overflow-hidden shadow rounded-lg">
+                  <div className="px-4 py-5 sm:p-6">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 h-16 w-16 rounded-full overflow-hidden bg-gray-100">
+                        {influencer.profile_image_url ? (
+                          <Image 
+                            src={influencer.profile_image_url} 
+                            alt={influencer.full_name} 
+                            width={64} 
+                            height={64} 
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="h-full w-full flex items-center justify-center">
+                            <span className="text-xl font-semibold text-gray-500">
+                              {influencer.full_name.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      <p className="mt-1 text-sm text-gray-500">{influencer.niche}</p>
+                      <div className="ml-4">
+                        <h3 className="text-lg font-medium text-gray-900">{influencer.full_name}</h3>
+                        <div className="flex items-center mt-1">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                            {influencer.platform}
+                          </span>
+                          <span className="ml-2 text-sm text-gray-500">{formatFollowers(influencer.followers)} followers</span>
+                        </div>
+                        <p className="mt-1 text-sm text-gray-500">{influencer.niche}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-sm text-gray-500 line-clamp-3">{influencer.bio}</p>
                     </div>
                   </div>
-                  <div className="mt-4">
-                    <p className="text-sm text-gray-500 line-clamp-3">{influencer.bio}</p>
+                  <div className="bg-gray-50 px-4 py-4 sm:px-6">
+                    <div className="flex justify-between items-center">
+                      <Link 
+                        href={`/business/influencers/${influencer.id}`}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                      >
+                        View Profile
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleContactClick(influencer)}
+                        className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
+                      >
+                        Contact ({contactCost} Tokens)
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="bg-gray-50 px-4 py-4 sm:px-6">
-                  <div className="flex justify-between">
-                    <Link 
-                      href={`/business/influencers/${influencer.id}`}
-                      className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
-                    >
-                      View Profile
-                    </Link>
-                    <button
-                      type="button"
-                      className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
-                    >
-                      Contact
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>
+      
+      {/* Contact Modal */}
+      {showContactModal && selectedInfluencer && (
+        <div className="fixed z-10 inset-0 overflow-y-auto">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+            
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            
+            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="sm:flex sm:items-start">
+                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-indigo-100 sm:mx-0 sm:h-10 sm:w-10">
+                    <svg className="h-6 w-6 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900">
+                      Contact Influencer
+                    </h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500">
+                        You are about to spend <span className="font-bold">{calculateContactCost(selectedInfluencer.followers)} tokens</span> to contact {selectedInfluencer.full_name}. 
+                        This will allow you to send a direct message and proposal to this influencer.
+                      </p>
+                      <p className="mt-2 text-sm text-gray-500">
+                        Your current balance: <span className="font-bold">{userTokens} tokens</span>
+                      </p>
+                      {userTokens < calculateContactCost(selectedInfluencer.followers) && (
+                        <p className="mt-2 text-sm text-red-500 font-medium">
+                          You don't have enough tokens. Please purchase more tokens to continue.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={handleConfirmContact}
+                  disabled={userTokens < calculateContactCost(selectedInfluencer.followers)}
+                  className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm ${
+                    userTokens >= calculateContactCost(selectedInfluencer.followers) ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-indigo-300 cursor-not-allowed'
+                  }`}
+                >
+                  Confirm ({calculateContactCost(selectedInfluencer.followers)} Tokens)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowContactModal(false)}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/app/supabase/client';
 import Link from 'next/link';
+import { useAuth } from '@/app/context/AuthContext';
 
 interface Influencer {
   id: string;
@@ -43,6 +44,7 @@ interface Campaign {
 }
 
 export default function SearchInfluencersPage() {
+  const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const campaignId = searchParams.get('campaignId');
@@ -63,6 +65,9 @@ export default function SearchInfluencersPage() {
     location: ''
   });
   const [selectionMode, setSelectionMode] = useState<'individual' | 'group'>('individual');
+  const [userTokens, setUserTokens] = useState(0);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [selectedInfluencerForContact, setSelectedInfluencerForContact] = useState<Influencer | null>(null);
 
   // Fetch campaign details
   useEffect(() => {
@@ -181,6 +186,29 @@ export default function SearchInfluencersPage() {
     fetchInfluencers();
   }, [filters]);
 
+  // Fetch user's token balance
+  useEffect(() => {
+    const fetchUserTokens = async () => {
+      if (!user) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('business_profiles')
+          .select('tokens')
+          .eq('user_id', user.id)
+          .single();
+        
+        if (error) throw error;
+        
+        setUserTokens(data?.tokens || 0);
+      } catch (err) {
+        console.error('Error fetching token balance:', err);
+      }
+    };
+    
+    fetchUserTokens();
+  }, [user]);
+
   // Add this helper function to shuffle the array
   const shuffleArray = (array: any[]) => {
     // Create a copy of the array to avoid mutating the original
@@ -216,22 +244,56 @@ export default function SearchInfluencersPage() {
     }
   };
 
+  // Calculate total token cost for all selected influencers
+  const calculateTotalTokenCost = () => {
+    return selectedInfluencers.reduce((total, influencerId) => {
+      const influencer = influencers.find(inf => inf.id === influencerId);
+      if (influencer) {
+        return total + calculateContactCost(influencer.followers);
+      }
+      return total;
+    }, 0);
+  };
+  
+  // Modified invite function to handle token deduction
   const inviteInfluencers = async () => {
     if (selectedInfluencers.length === 0) {
       alert('Please select at least one influencer');
       return;
     }
     
+    const totalCost = calculateTotalTokenCost();
+    
+    // Check if user has enough tokens
+    if (userTokens < totalCost) {
+      alert(`You don't have enough tokens. You need ${totalCost} tokens to invite these influencers.`);
+      return;
+    }
+    
     setInviting(true);
     
     try {
+      // Deduct tokens from user's balance
+      const { error: updateError } = await supabase
+        .from('business_profiles')
+        .update({ tokens: userTokens - totalCost })
+        .eq('user_id', user?.id);
+      
+      if (updateError) throw new Error(updateError.message);
+      
       // Create campaign invitations for each selected influencer
-      const invitations = selectedInfluencers.map(influencerId => ({
-        campaign_id: campaignId,
-        influencer_id: influencerId,
-        status: 'pending',
-        created_at: new Date().toISOString()
-      }));
+      const invitations = selectedInfluencers.map(influencerId => {
+        const influencer = influencers.find(inf => inf.id === influencerId);
+        const tokenCost = influencer ? calculateContactCost(influencer.followers) : 0;
+        
+        return {
+          campaign_id: campaignId,
+          influencer_id: influencerId,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          tokens_spent: tokenCost
+        };
+      });
       
       const { data, error } = await supabase
         .from('campaign_invitations')
@@ -240,18 +302,107 @@ export default function SearchInfluencersPage() {
         
       if (error) throw new Error(error.message);
       
+      // Record the token transactions
+      const tokenTransactions = selectedInfluencers.map(influencerId => {
+        const influencer = influencers.find(inf => inf.id === influencerId);
+        const tokenCost = influencer ? calculateContactCost(influencer.followers) : 0;
+        
+        return {
+          business_id: user?.id,
+          influencer_id: influencerId,
+          tokens_spent: tokenCost,
+          status: 'spent',
+          type: 'campaign_invitation',
+          campaign_id: campaignId,
+          created_at: new Date().toISOString()
+        };
+      });
+      
+      const { error: transactionError } = await supabase
+        .from('token_transactions')
+        .insert(tokenTransactions);
+      
+      if (transactionError) throw new Error(transactionError.message);
+      
+      // Update local token count
+      setUserTokens(userTokens - totalCost);
+      
       alert(`Successfully invited ${selectedInfluencers.length} influencer(s) to your campaign!`);
       
-      // Redirect back to campaign page
-      router.push(campaign?.custom_id 
-        ? `/business/campaigns/c/${campaign.custom_id}` 
-        : `/business/campaigns/${campaignId}`);
-        
-    } catch (err) {
+      // Reset selection
+      setSelectedInfluencers([]);
+    } catch (err: any) {
       console.error('Error inviting influencers:', err);
-      setError('Failed to invite influencers. Please try again.');
+      alert('Failed to invite influencers: ' + err.message);
     } finally {
       setInviting(false);
+    }
+  };
+
+  // Calculate contact cost based on followers
+  const calculateContactCost = (followers: number) => {
+    // Base cost is 100 tokens
+    const baseCost = 100;
+    
+    // Calculate additional cost based on followers
+    let additionalCost = Math.floor(followers / 10000);
+    
+    // Cap the total cost at 800 tokens
+    const totalCost = Math.min(baseCost + additionalCost, 800);
+    
+    return totalCost;
+  };
+
+  // Handle contact button click
+  const handleContactClick = (influencer: Influencer) => {
+    setSelectedInfluencerForContact(influencer);
+    setShowContactModal(true);
+  };
+
+  // Process the contact request
+  const handleConfirmContact = async () => {
+    if (!selectedInfluencerForContact || !user) return;
+    
+    try {
+      const contactCost = calculateContactCost(selectedInfluencerForContact.followers);
+      
+      // Check if user has enough tokens
+      if (userTokens < contactCost) {
+        alert('You do not have enough tokens to contact this influencer.');
+        return;
+      }
+      
+      // Deduct tokens from user's balance
+      const { error: updateError } = await supabase
+        .from('business_profiles')
+        .update({ tokens: userTokens - contactCost })
+        .eq('user_id', user.id);
+      
+      if (updateError) throw updateError;
+      
+      // Record the contact in the database
+      const { error: contactError } = await supabase
+        .from('influencer_contacts')
+        .insert({
+          business_id: user.id,
+          influencer_id: selectedInfluencerForContact.firebase_uid,
+          tokens_spent: contactCost,
+          status: 'pending',
+          created_at: new Date()
+        });
+      
+      if (contactError) throw contactError;
+      
+      // Update local token count
+      setUserTokens(userTokens - contactCost);
+      
+      // Close modal and show success message
+      setShowContactModal(false);
+      alert('Contact request sent successfully!');
+      
+    } catch (err: any) {
+      console.error('Error processing contact request:', err);
+      alert('Failed to process your request. Please try again.');
     }
   };
 
@@ -296,14 +447,19 @@ export default function SearchInfluencersPage() {
             <h1 className="text-2xl font-bold text-gray-900">
               Search Influencers for {campaign?.title}
             </h1>
-            <Link
-              href={campaign?.custom_id 
-                ? `/business/campaigns/c/${campaign.custom_id}` 
-                : `/business/campaigns/${campaignId}`}
-              className="text-indigo-600 hover:text-indigo-900"
-            >
-              ← Back to campaign
-            </Link>
+            <div className="flex items-center">
+              <span className="mr-4 text-sm font-medium text-gray-600">
+                Your Tokens: <span className="text-indigo-600 font-bold">{userTokens}</span>
+              </span>
+              <Link
+                href={campaign?.custom_id 
+                  ? `/business/campaigns/c/${campaign.custom_id}` 
+                  : `/business/campaigns/${campaignId}`}
+                className="text-indigo-600 hover:text-indigo-900"
+              >
+                ← Back to campaign
+              </Link>
+            </div>
           </div>
         </div>
       </header>
@@ -462,18 +618,30 @@ export default function SearchInfluencersPage() {
               </p>
             </div>
             
-            <button
-              onClick={inviteInfluencers}
-              disabled={selectedInfluencers.length === 0 || inviting}
-              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-            >
-              {inviting 
-                ? 'Sending Invites...' 
-                : selectionMode === 'individual' 
-                  ? `Invite Influencer${selectedInfluencers.length ? '' : ' (Select One)'}` 
-                  : `Invite Selected (${selectedInfluencers.length})`
-              }
-            </button>
+            <div className="flex flex-col items-end">
+              {selectedInfluencers.length > 0 && (
+                <p className="text-sm text-gray-600 mb-2">
+                  Total cost: <span className="font-bold text-indigo-600">{calculateTotalTokenCost()} tokens</span>
+                </p>
+              )}
+              <button
+                onClick={inviteInfluencers}
+                disabled={selectedInfluencers.length === 0 || inviting || userTokens < calculateTotalTokenCost()}
+                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+              >
+                {inviting 
+                  ? 'Sending Invites...' 
+                  : selectionMode === 'individual' 
+                    ? `Invite Influencer (${calculateTotalTokenCost()} tokens)` 
+                    : `Invite Selected (${selectedInfluencers.length}) for ${calculateTotalTokenCost()} tokens`
+                }
+              </button>
+              {userTokens < calculateTotalTokenCost() && selectedInfluencers.length > 0 && (
+                <p className="text-xs text-red-500 mt-1">
+                  Not enough tokens. You need {calculateTotalTokenCost() - userTokens} more.
+                </p>
+              )}
+            </div>
           </div>
           
           <div className="border-t border-gray-200">
@@ -483,141 +651,130 @@ export default function SearchInfluencersPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 p-6">
-                {influencers.map(influencer => (
-                  <div key={influencer.id} className="bg-white overflow-hidden shadow-lg rounded-lg border border-gray-200 hover:shadow-xl transition-shadow duration-300">
-                    <div className="px-4 py-5 sm:p-6">
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id={`select-${influencer.id}`}
-                          checked={selectedInfluencers.includes(influencer.id)}
-                          onChange={() => toggleInfluencerSelection(influencer.id)}
-                          className="h-5 w-5 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-4"
-                        />
-                        
-                        <div className="flex-shrink-0 h-20 w-20 rounded-full overflow-hidden bg-gray-100">
-                          {influencer.avatar_url ? (
-                            <img 
-                              src={influencer.avatar_url} 
-                              alt={influencer.full_name || influencer.email || 'Influencer'} 
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center">
-                              <span className="text-2xl font-semibold text-gray-500">
-                                {(influencer.full_name || influencer.email || 'User').charAt(0).toUpperCase()}
+                {influencers.map(influencer => {
+                  const contactCost = calculateContactCost(influencer.followers);
+                  
+                  return (
+                    <div key={influencer.id} className="bg-white overflow-hidden shadow-lg rounded-lg border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+                      <div className="px-4 py-5 sm:p-6">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-20 w-20 rounded-full overflow-hidden bg-gray-100">
+                            {influencer.avatar_url ? (
+                              <img 
+                                src={influencer.avatar_url} 
+                                alt={influencer.full_name || influencer.email || 'Influencer'} 
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="h-full w-full flex items-center justify-center">
+                                <span className="text-2xl font-semibold text-gray-500">
+                                  {(influencer.full_name || influencer.email || 'User').charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="ml-4">
+                            <h3 className="text-lg font-medium text-gray-900">
+                              {influencer.full_name || influencer.email?.split('@')[0] || 'Anonymous Influencer'}
+                            </h3>
+                            <div className="flex items-center mt-1 flex-wrap">
+                              {influencer.primary_platform && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 mr-2 mb-1">
+                                  {influencer.primary_platform}
+                                </span>
+                              )}
+                              {influencer.followers > 0 && (
+                                <span className="text-sm text-gray-500 mb-1">
+                                  {influencer.followers.toLocaleString()} followers
+                                </span>
+                              )}
+                            </div>
+                            {influencer.niche && (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mt-1">
+                                {influencer.niche}
                               </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {influencer.bio && (
+                          <div className="mt-4">
+                            <p className="text-sm text-gray-500 line-clamp-3">{influencer.bio}</p>
+                          </div>
+                        )}
+                        
+                        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500">
+                          {influencer.engagement_rate && (
+                            <div className="flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                              </svg>
+                              <span>{influencer.engagement_rate}% engagement</span>
                             </div>
                           )}
-                        </div>
-                        
-                        <div className="ml-4">
-                          <h3 className="text-lg font-medium text-gray-900">
-                            {influencer.full_name || influencer.email?.split('@')[0] || 'Anonymous Influencer'}
-                          </h3>
-                          <div className="flex items-center mt-1 flex-wrap">
-                            {influencer.primary_platform && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 mr-2 mb-1">
-                                {influencer.primary_platform}
-                              </span>
-                            )}
-                            {influencer.followers > 0 && (
-                              <span className="text-sm text-gray-500 mb-1">
-                                {influencer.followers.toLocaleString()} followers
-                              </span>
-                            )}
-                          </div>
-                          {influencer.niche && (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 mt-1">
-                              {influencer.niche}
-                            </span>
+                          {influencer.avg_likes && (
+                            <div className="flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                              </svg>
+                              <span>~{influencer.avg_likes?.toLocaleString()} likes/post</span>
+                            </div>
                           )}
+                          {influencer.location && (
+                            <div className="flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              <span>{influencer.location}</span>
+                            </div>
+                          )}
+                          {influencer.audience_demographics && (
+                            <div className="flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                              </svg>
+                              <span>{influencer.audience_demographics}</span>
+                            </div>
+                          )}
+                          {/* Add token cost info */}
+                          <div className="flex items-center col-span-2 mt-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span className="font-medium text-indigo-600">{contactCost} tokens</span> <span className="ml-1">to contact</span>
+                          </div>
                         </div>
                       </div>
                       
-                      {influencer.bio && (
-                        <div className="mt-4">
-                          <p className="text-sm text-gray-500 line-clamp-3">{influencer.bio}</p>
+                      <div className="bg-gray-50 px-4 py-4 sm:px-6">
+                        <div className="flex justify-between">
+                          <Link
+                            href={`/business/influencers/${influencer.id}`}
+                            className="text-sm font-medium text-indigo-600 hover:text-indigo-500 flex items-center"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            View Profile
+                          </Link>
+                          <button
+                            onClick={() => toggleInfluencerSelection(influencer.id)}
+                            className={`inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md ${
+                              selectedInfluencers.includes(influencer.id)
+                                ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                                : 'text-indigo-700 bg-indigo-100 hover:bg-indigo-200'
+                            }`}
+                          >
+                            {selectedInfluencers.includes(influencer.id) ? 'Selected' : 'Select'}
+                          </button>
                         </div>
-                      )}
-                      
-                      <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500">
-                        {influencer.engagement_rate && (
-                          <div className="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                            </svg>
-                            <span>{influencer.engagement_rate}% engagement</span>
-                          </div>
-                        )}
-                        {influencer.avg_likes && (
-                          <div className="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                            </svg>
-                            <span>~{influencer.avg_likes?.toLocaleString()} likes/post</span>
-                          </div>
-                        )}
-                        {influencer.location && (
-                          <div className="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            <span>{influencer.location}</span>
-                          </div>
-                        )}
-                        {influencer.audience_demographics && (
-                          <div className="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                            </svg>
-                            <span>{influencer.audience_demographics}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
-                    
-                    <div className="bg-gray-50 px-4 py-4 sm:px-6">
-                      <div className="flex justify-between">
-                        <Link
-                          href={`/business/influencers/${influencer.id}`}
-                          className="text-sm font-medium text-indigo-600 hover:text-indigo-500 flex items-center"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                          View Profile
-                        </Link>
-                        <button
-                          onClick={() => toggleInfluencerSelection(influencer.id)}
-                          className={`inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md ${
-                            selectedInfluencers.includes(influencer.id)
-                              ? 'text-red-700 bg-red-100 hover:bg-red-200'
-                              : 'text-indigo-700 bg-indigo-100 hover:bg-indigo-200'
-                          }`}
-                        >
-                          {selectedInfluencers.includes(influencer.id) ? (
-                            <>
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                              Deselect
-                            </>
-                          ) : (
-                            <>
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                              Select
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
