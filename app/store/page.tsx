@@ -1,9 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/app/context/AuthContext';
 import Link from 'next/link';
+import { createPaymentIntent, TOKEN_PACKAGES, PackageId } from '@/app/utils/stripe';
+import { supabase } from '@/app/supabase/client';
+import PaymentModal from '@/app/components/PaymentModal';
 
 interface StoreItem {
   id: string;
@@ -21,60 +24,83 @@ interface StoreItem {
 export default function StorePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [userTokens, setUserTokens] = useState(0);
+  const [processingPayment, setProcessingPayment] = useState<string | null>(null);
+  const [paymentModal, setPaymentModal] = useState<{
+    isOpen: boolean;
+    packageId: PackageId;
+    packageName: string;
+    tokens: number;
+    price: number;
+  }>({
+    isOpen: false,
+    packageId: 'small',
+    packageName: '',
+    tokens: 0,
+    price: 0
+  });
 
-  useEffect(() => {
-    if (!loading) {
-      if (!user) {
-        router.push('/auth/login');
-        return;
-      }
-      
-      loadStoreData();
-    }
-  }, [user, loading, router]);
-
-  const loadStoreData = async () => {
+  const loadStoreData = useCallback(async () => {
     try {
       setIsLoading(true);
       
-      // This would be replaced with an actual API call in production
-      // For now, using sample data
-      setUserTokens(0);
+            // Load user's token balance via API
+      if (user) {
+        try {
+          console.log('Loading tokens for user:', user.id);
+          
+          // Get Firebase ID token
+          const idToken = await user.firebaseUser?.getIdToken();
+          
+          if (!idToken) {
+            console.error('No ID token available');
+            setUserTokens(0);
+            return;
+          }
+          
+          // Call API to get tokens
+          const response = await fetch('/api/user/tokens', {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${idToken}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (!response.ok) {
+            console.error('Failed to fetch tokens:', response.status);
+            setUserTokens(0);
+            return;
+          }
+          
+          const data = await response.json();
+          console.log('User tokens loaded:', data.token_balance);
+          setUserTokens(data.token_balance || 0);
+          
+        } catch (error) {
+          console.error('Exception loading user tokens:', error);
+          setUserTokens(0);
+        }
+      }
+      
+      // Create token packages based on our Stripe configuration
+      const tokenItems: StoreItem[] = Object.entries(TOKEN_PACKAGES).map(([id, pkg]) => ({
+        id: `tokens-${id}`,
+        name: `${pkg.tokens.toLocaleString()} Tokens`,
+        description: `${pkg.name} - Perfect for ${pkg.tokens < 2000 ? 'small' : pkg.tokens < 4000 ? 'medium' : 'large'} campaigns and profile boosts.`,
+        price: pkg.price,
+        category: 'tokens' as const,
+        userType: 'all',
+        popular: id === 'medium',
+        image: '/images/store/tokens-medium.png'
+      }));
       
       const allStoreItems: StoreItem[] = [
-        // Tokens - available to all users
-        {
-          id: 'tokens-100',
-          name: '100 Tokens',
-          description: 'Basic token package for small campaigns and profile boosts.',
-          price: 9.99,
-          category: 'tokens' as const,
-          userType: 'all',
-          image: '/images/store/tokens-small.png'
-        },
-        {
-          id: 'tokens-500',
-          name: '500 Tokens',
-          description: 'Medium token package with 10% bonus tokens included.',
-          price: 39.99,
-          category: 'tokens' as const,
-          userType: 'all',
-          popular: true,
-          image: '/images/store/tokens-medium.png'
-        },
-        {
-          id: 'tokens-1000',
-          name: '1000 Tokens',
-          description: 'Large token package with 20% bonus tokens included.',
-          price: 69.99,
-          category: 'tokens' as const,
-          userType: 'all',
-          image: '/images/store/tokens-large.png'
-        },
+        ...tokenItems,
         
         // Boosts for Influencers
         {
@@ -200,43 +226,101 @@ export default function StorePage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (!loading) {
+      if (!user) {
+        router.push('/auth/login');
+        return;
+      }
+      
+      loadStoreData();
+    }
+  }, [user, loading, loadStoreData]);
+
+  // Handle payment success/cancel URLs
+  useEffect(() => {
+    const success = searchParams.get('success');
+    const canceled = searchParams.get('canceled');
+    
+    if (success === 'true') {
+      // Reload token balance after successful payment
+      loadStoreData();
+      // Clean up URL
+      router.replace('/store');
+    } else if (canceled === 'true') {
+      // Clean up URL
+      router.replace('/store');
+    }
+  }, [searchParams, router, loadStoreData]);
 
   const handlePurchase = async (item: StoreItem) => {
+    console.log('🛒 Purchase initiated for item:', item);
+    
     try {
-      // This would be replaced with actual payment processing
-      console.log(`Purchasing ${item.name} for ${item.price}`);
+      setProcessingPayment(item.id);
+      console.log('⏳ Processing payment for item:', item.id);
       
-      alert(`Successfully purchased ${item.name}!`);
-      
-      // If it's a token purchase, update the user's token balance
       if (item.category === 'tokens') {
-        // Extract the number from the item name (e.g., "100 Tokens" -> 100)
-        const tokenAmount = parseInt(item.name.split(' ')[0]);
-        setUserTokens(prevTokens => prevTokens + tokenAmount);
+        // Extract package ID from item ID (e.g., "tokens-small" -> "small")
+        const packageId = item.id.replace('tokens-', '') as PackageId;
+        const packageConfig = TOKEN_PACKAGES[packageId];
         
-        // In a real app, you would update the user's token balance in the database
-        // await updateUserTokens(user.uid, tokenAmount);
-      }
-      
-      // If it's a boost purchase, deduct tokens and apply the boost
-      if (item.category === 'boosts') {
+        console.log('💰 Token purchase details:', {
+          packageId,
+          packageConfig,
+          user: user?.id
+        });
+        
+        // Open payment modal
+        setPaymentModal({
+          isOpen: true,
+          packageId,
+          packageName: packageConfig.name,
+          tokens: packageConfig.tokens,
+          price: packageConfig.price
+        });
+        
+        console.log('🎭 Payment modal opened with data:', {
+          packageId,
+          packageName: packageConfig.name,
+          tokens: packageConfig.tokens,
+          price: packageConfig.price
+        });
+        
+      } else if (item.category === 'boosts') {
+        // Check if user has enough tokens
+        if (userTokens < item.price) {
+          alert('Not enough tokens for this boost. Please purchase more tokens first.');
+          return;
+        }
+        
+        // Deduct tokens from user's balance in Users table
+        const { error } = await supabase
+          .from('Users')
+          .update({ token_balance: userTokens - item.price })
+          .eq('firebase_uid', user?.id);
+        
+        if (error) {
+          alert('Error processing boost purchase. Please try again.');
+          return;
+        }
+        
+        // Update local state
         setUserTokens(prevTokens => prevTokens - item.price);
+        alert(`Successfully purchased ${item.name}!`);
         
-        // In a real app, you would apply the boost and update the user's token balance
-        // await applyBoost(user.uid, item.id);
-        // await updateUserTokens(user.uid, -item.price);
-      }
-      
-      // If it's a subscription purchase, handle subscription logic
-      if (item.category === 'subscriptions') {
-        // In a real app, you would handle subscription logic
-        // await createSubscription(user.uid, item.id);
+      } else if (item.category === 'subscriptions') {
+        // Handle subscription logic (would integrate with Stripe Subscriptions)
+        alert('Subscription functionality coming soon!');
       }
       
     } catch (error) {
       console.error('Error processing purchase:', error);
       alert('There was an error processing your purchase. Please try again.');
+    } finally {
+      setProcessingPayment(null);
     }
   };
 
@@ -420,13 +504,26 @@ export default function StorePage() {
                   <button
                     type="button"
                     onClick={() => handlePurchase(item)}
-                    disabled={item.category === 'boosts' && userTokens < item.price}
+                    disabled={
+                      (item.category === 'boosts' && userTokens < item.price) ||
+                      processingPayment === item.id
+                    }
                     className={`w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white 
-                      ${item.category === 'boosts' && userTokens < item.price 
+                      ${(item.category === 'boosts' && userTokens < item.price) || processingPayment === item.id
                         ? 'bg-gray-400 cursor-not-allowed' 
                         : 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'}`}
                   >
-                    {item.category === 'subscriptions' ? 'Subscribe' : item.category === 'tokens' ? 'Purchase' : 'Redeem'}
+                    {processingPayment === item.id ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing...
+                      </>
+                    ) : (
+                      item.category === 'subscriptions' ? 'Subscribe' : item.category === 'tokens' ? 'Purchase' : 'Redeem'
+                    )}
                   </button>
                   
                   {item.category === 'boosts' && userTokens < item.price && (
@@ -493,6 +590,16 @@ export default function StorePage() {
           </div>
         </div>
       </main>
+      
+      {/* Payment Modal */}
+      <PaymentModal
+        isOpen={paymentModal.isOpen}
+        onClose={() => setPaymentModal(prev => ({ ...prev, isOpen: false }))}
+        packageId={paymentModal.packageId}
+        packageName={paymentModal.packageName}
+        tokens={paymentModal.tokens}
+        price={paymentModal.price}
+      />
     </div>
   );
 } 

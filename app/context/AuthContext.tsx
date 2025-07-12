@@ -78,6 +78,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                   console.error('Exception storing user data in Supabase:', insertErr);
                 }
               }
+            } else if (error) {
+              // Handle other Supabase errors gracefully
+              console.error('Supabase query error:', error);
+              // Fall back to Firebase display name
+              userType = firebaseUser.displayName?.split(':')[0] || null;
             }
           } catch (supabaseError) {
             console.error('Error fetching user data from Supabase:', supabaseError);
